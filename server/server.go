@@ -1,6 +1,7 @@
 package server
 
 import (
+	"18749-team9/types"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -9,8 +10,8 @@ import (
 
 type ClientMessage struct {
 	id         string
-	message    Message
-	responseCh chan Response
+	message    types.Message
+	responseCh chan types.Response
 }
 
 type Server interface {
@@ -106,25 +107,25 @@ func (s *server) manager() {
 	for {
 		select {
 		case msg := <-s.msgCh:
-			var resp Response
+			var resp types.Response
 			switch msg.message.Type {
 			case "client":
 				switch msg.message.Message {
 				case "Init":
-					resp = Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Initialized"}
+					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Initialized"}
 				case "CountUp":
 					s.state++
-					resp = Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
+					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
 				case "CountDown":
 					s.state--
-					resp = Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
+					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
 				case "Close":
-					resp = Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
+					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
 				default:
-					resp = Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
+					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
 				}
 			case "lfd":
-				resp = Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
+				resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
 			}
 
 			msg.responseCh <- resp
@@ -146,7 +147,7 @@ func (s *server) handleConnection(conn net.Conn) {
 		if err != nil {
 			return
 		}
-		var msg Message
+		var msg types.Message
 		err = json.Unmarshal(buf[:n], &msg)
 		if err != nil {
 			return
@@ -156,7 +157,7 @@ func (s *server) handleConnection(conn net.Conn) {
 		request := ClientMessage{
 			id:         msg.Id,
 			message:    msg,
-			responseCh: make(chan Response),
+			responseCh: make(chan types.Response),
 		}
 		fmt.Printf("Request: %+v\n", msg)
 		s.msgCh <- request

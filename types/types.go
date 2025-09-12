@@ -1,4 +1,4 @@
-package server
+package types
 
 type Message struct {
 	Type    string `json:"type"` // "client" or "lfd"
