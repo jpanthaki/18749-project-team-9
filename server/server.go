@@ -1,11 +1,12 @@
 package server
 
 import (
-	"18749-team9/types"
 	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
+
+	"18749-team9/types"
 )
 
 type ClientMessage struct {
