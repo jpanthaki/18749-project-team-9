@@ -3,12 +3,19 @@ package main
 import (
 	"18749-team9/server"
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
 )
 
 func main() {
+	id := flag.String("id", "S1", "id of the server")
+	port := flag.Int("port", 8080, "port of the server")
+	flag.Parse()
+
+	fmt.Printf("Starting server with ID: %s, Port: %d, Protocol: %s\n", *id, *port, "tcp")
+
 	sv, err := server.NewServer("S1", 8080, "tcp")
 	if err != nil {
 		panic(err)

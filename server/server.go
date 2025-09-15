@@ -28,7 +28,7 @@ type server struct {
 	protocol string
 	listener net.Listener
 
-	state   int
+	state   map[string]int
 	isReady bool
 	status  string
 	msgCh   chan clientMessage
@@ -43,7 +43,7 @@ func NewServer(id string, port int, protocol string) (Server, error) {
 		id:       id,
 		port:     port,
 		protocol: protocol,
-		state:    0,
+		state:    make(map[string]int),
 		isReady:  false,
 		status:   "stopped",
 
@@ -63,19 +63,16 @@ func (s *server) Start() error {
 	s.listener = l
 	s.status = "running"
 	fmt.Printf("Listening on %d\n", s.port)
-	defer l.Close()
 
 	ready := make(chan struct{})
-
-	//this is here so we set isReady at the right time
-	go func() {
-		s.listen()
-		s.isReady = true
-		close(ready)
-	}()
-
+	// Start manager goroutine
 	go s.manager()
+	go s.listen(ready)
+
+	// Wait for listener to be ready
 	<-ready
+	s.isReady = true
+
 	return nil
 }
 
@@ -105,8 +102,9 @@ func (s *server) Ready() bool {
 	return s.isReady
 }
 
-func (s *server) listen() {
-	s.isReady = true
+func (s *server) listen(readyCh chan struct{}) {
+	close(readyCh)
+	defer s.listener.Close()
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
@@ -129,13 +127,16 @@ func (s *server) manager() {
 			case "client":
 				switch msg.message.Message {
 				case "Init":
-					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Initialized"}
+					s.state[msg.id] = 0
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("Client: %s Initialized, State: %d", msg.id, s.state[msg.id])}
 				case "CountUp":
-					s.state++
-					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
+					s.state[msg.id]++
+					fmt.Println("State after CountUp:", s.state)
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Up, State: %d}", msg.id, s.state[msg.id])}
 				case "CountDown":
-					s.state--
-					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
+					s.state[msg.id]--
+					fmt.Println("State after CountDown:", s.state)
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Down, State: %d}", msg.id, s.state[msg.id])}
 				case "Close":
 					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
 				default:

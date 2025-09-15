@@ -49,9 +49,10 @@ func TestServerWithThreeClients(t *testing.T) {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	go func() {
-		_ = srv.Start()
-	}()
+	//go func() {
+	//	_ = srv.Start()
+	//}()
+	_ = srv.Start()
 
 	// Get the actual port assigned
 	serverImpl := srv.(*server)
@@ -71,16 +72,31 @@ func TestServerWithThreeClients(t *testing.T) {
 		msg    string
 		expect string
 	}
-	clients := []clientCase{
-		{"client1", "Init", "Initialized"},
-		{"client2", "CountUp", "State: 1"},
-		{"client3", "CountDown", "State: 0"},
+	clients := map[string][]clientCase{
+		"client1": {
+			{"client1", "Init", "Client: client1 Initialized, State: 0"},
+			{"client1", "CountUp", "Client: client1 Counted Up, State: 1"},
+			{"client1", "CountDown", "Client: client1 Counted Down, State: 0"},
+			{"client1", "Close", "Client: client1 Closed"},
+		},
+		"client2": {
+			{"client2", "Init", "Client: client2 Initialized, State: 0"},
+			{"client2", "CountUp", "Client: client2 Counted Up, State: 1"},
+			{"client2", "CountDown", "Client: client2 Counted Down, State: 0"},
+			{"client2", "Close", "Client: client2 Closed"},
+		},
+		"client3": {
+			{"client3", "Init", "Client: client3 Initialized, State: 0"},
+			{"client3", "CountUp", "Client: client3 Counted Up, State: 1"},
+			{"client3", "CountDown", "Client: client3 Counted Down, State: 0"},
+			{"client3", "Close", "Client: client3 Closed"},
+		},
 	}
 
 	doneCh := make(chan error, len(clients))
 
-	for i, cc := range clients {
-		go func(idx int, cc clientCase) {
+	for clientID, msgs := range clients {
+		go func(clientID string, msgs []clientCase) {
 			conn, err := net.Dial("tcp", ":"+strconv.Itoa(port))
 			if err != nil {
 				doneCh <- err
@@ -88,53 +104,59 @@ func TestServerWithThreeClients(t *testing.T) {
 			}
 			defer conn.Close()
 
-			msg := types.Message{
-				Type:    "client",
-				Id:      cc.id,
-				ReqNum:  idx,
-				Message: cc.msg,
-			}
-			data, _ := json.Marshal(msg)
-			_, err = conn.Write(data)
-			if err != nil {
-				doneCh <- err
-				return
-			}
+			for idx, cc := range msgs {
+				msg := types.Message{
+					Type:    "client",
+					Id:      cc.id,
+					ReqNum:  idx,
+					Message: cc.msg,
+				}
 
-			buf := make([]byte, 1024)
-			n, err := conn.Read(buf)
-			if err != nil {
-				doneCh <- err
-				return
-			}
-			var resp types.Response
-			err = json.Unmarshal(buf[:n], &resp)
-			if err != nil {
-				doneCh <- err
-				return
-			}
+				data, _ := json.Marshal(msg)
+				_, err = conn.Write(data)
+				if err != nil {
+					doneCh <- err
+					return
+				}
+				buf := make([]byte, 1024)
+				n, err := conn.Read(buf)
+				if err != nil {
+					doneCh <- err
+					return
+				}
+				var resp types.Response
+				err = json.Unmarshal(buf[:n], &resp)
+				if err != nil {
+					doneCh <- err
+					return
+				}
 
-			if resp.Id != cc.id {
-				doneCh <- fmt.Errorf("client %s: expected id %s, got %s", cc.id, cc.id, resp.Id)
-				return
-			}
-			if cc.msg == "Init" && resp.Response != "Initialized" {
-				doneCh <- fmt.Errorf("client %s: expected response 'Initialized', got '%s'", cc.id, resp.Response)
-				return
-			}
-			if cc.msg == "CountUp" && !strings.Contains(resp.Response, "State: 1") {
-				doneCh <- fmt.Errorf("client %s: expected response to contain 'State: 1', got '%s'", cc.id, resp.Response)
-				return
-			}
-			if cc.msg == "CountDown" && !strings.Contains(resp.Response, "State: 0") {
-				doneCh <- fmt.Errorf("client %s: expected response to contain 'State: 0', got '%s'", cc.id, resp.Response)
-				return
+				if resp.Id != cc.id {
+					doneCh <- fmt.Errorf("Client %s: expected id %s, got %s", clientID, cc.id, resp.Id)
+					return
+				}
+				if resp.ReqNum != idx {
+					doneCh <- fmt.Errorf("Client %s: expected ReqNum %d, got %d", clientID, idx, resp.ReqNum)
+					return
+				}
+				if cc.msg == "Init" && resp.Response != fmt.Sprintf("Client: %s Initialized, State: 0", cc.id) {
+					doneCh <- fmt.Errorf("client %s: expected response 'Initialized', got '%s'", cc.id, resp.Response)
+					return
+				}
+				if cc.msg == "CountUp" && !strings.Contains(resp.Response, "State: 1") {
+					doneCh <- fmt.Errorf("client %s: expected response to contain 'State: 1', got '%s'", cc.id, resp.Response)
+					return
+				}
+				if cc.msg == "CountDown" && !strings.Contains(resp.Response, "State: 0") {
+					doneCh <- fmt.Errorf("client %s: expected response to contain 'State: 0', got '%s'", cc.id, resp.Response)
+					return
+				}
 			}
 			doneCh <- nil
-		}(i, cc)
+		}(clientID, msgs)
 	}
 
-	for range clients {
+	for i := 0; i < len(clients); i++ {
 		err := <-doneCh
 		if err != nil {
 			t.Errorf("Client error: %v", err)
