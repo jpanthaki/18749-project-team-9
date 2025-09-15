@@ -9,7 +9,7 @@ import (
 	"18749-team9/types"
 )
 
-type ClientMessage struct {
+type clientMessage struct {
 	id         string
 	message    types.Message
 	responseCh chan types.Response
@@ -19,6 +19,7 @@ type Server interface {
 	Start() error
 	Stop() error
 	Status() string
+	Ready() bool
 }
 
 type server struct {
@@ -27,12 +28,12 @@ type server struct {
 	protocol string
 	listener net.Listener
 
-	state    int
-	isReady  bool
-	status   string
-	msgCh    chan ClientMessage
-	closeCh  chan struct{}
-	statusCh chan (chan string)
+	state   int
+	isReady bool
+	status  string
+	msgCh   chan clientMessage
+	readyCh chan chan bool
+	closeCh chan struct{}
 
 	connections map[net.Conn]struct{} // Track active connections
 }
@@ -46,9 +47,8 @@ func NewServer(id string, port int, protocol string) (Server, error) {
 		isReady:  false,
 		status:   "stopped",
 
-		msgCh:       make(chan ClientMessage),
+		msgCh:       make(chan clientMessage),
 		closeCh:     make(chan struct{}),
-		statusCh:    make(chan (chan string)),
 		connections: make(map[net.Conn]struct{}), // Initialize client map
 	}
 	return s, nil
@@ -62,23 +62,21 @@ func (s *server) Start() error {
 	}
 	s.listener = l
 	s.status = "running"
-	s.isReady = true
 	fmt.Printf("Listening on %d\n", s.port)
 	defer l.Close()
 
+	ready := make(chan struct{})
+
+	//this is here so we set isReady at the right time
+	go func() {
+		s.listen()
+		s.isReady = true
+		close(ready)
+	}()
+
 	go s.manager()
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			return err
-		}
-		fmt.Println("connected to a client")
-
-		s.connections[conn] = struct{}{} // Add the new connection to the clients map
-
-		go s.handleConnection(conn)
-	}
+	<-ready
+	return nil
 }
 
 func (s *server) Stop() error {
@@ -87,10 +85,11 @@ func (s *server) Stop() error {
 	}
 	fmt.Println("Stopping server...")
 	s.status = "stopped"
+	s.isReady = false
 	if s.listener != nil {
 		s.listener.Close() // This will cause Accept() to return an error and exit Start()
 	}
-	// Close all active client connections
+	// Close all active connections
 	for conn := range s.connections {
 		conn.Close()
 	}
@@ -99,9 +98,26 @@ func (s *server) Stop() error {
 }
 
 func (s *server) Status() string {
-	responseCh := make(chan string)
-	s.statusCh <- responseCh
-	return <-responseCh
+	return s.status
+}
+
+func (s *server) Ready() bool {
+	return s.isReady
+}
+
+func (s *server) listen() {
+	s.isReady = true
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			return
+		}
+		fmt.Println("connected to a client")
+
+		s.connections[conn] = struct{}{} // Add the new connection to the clients map
+
+		go s.handleConnection(conn)
+	}
 }
 
 func (s *server) manager() {
@@ -113,25 +129,23 @@ func (s *server) manager() {
 			case "client":
 				switch msg.message.Message {
 				case "Init":
-					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Initialized"}
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Initialized"}
 				case "CountUp":
 					s.state++
-					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
 				case "CountDown":
 					s.state--
-					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s, State: %d}", msg.id, s.state)}
 				case "Close":
-					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
 				default:
-					resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
 				}
 			case "lfd":
-				resp = types.Response{Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
+				resp = types.Response{Type: "lfd", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
 			}
 
 			msg.responseCh <- resp
-		case statusRespCh := <-s.statusCh:
-			statusRespCh <- s.status
 		case <-s.closeCh:
 			return
 		}
@@ -155,7 +169,7 @@ func (s *server) handleConnection(conn net.Conn) {
 		}
 		fmt.Println("Received message:", msg)
 
-		request := ClientMessage{
+		request := clientMessage{
 			id:         msg.Id,
 			message:    msg,
 			responseCh: make(chan types.Response),
