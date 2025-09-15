@@ -182,6 +182,8 @@ func (s *server) handleConnection(conn net.Conn) {
 
 		if msg.Type == "client" {
 			s.logger.Infof("Received <%s, %s, %d, %s>", msg.Id, s.id, msg.ReqNum, msg.Message)
+		} else if msg.Type == "lfd" {
+			s.logger.Infof("<%d> Received heartbeat from %s", msg.ReqNum, msg.Id)
 		}
 
 		request := internalMessage{
@@ -195,6 +197,8 @@ func (s *server) handleConnection(conn net.Conn) {
 
 		if msg.Type == "client" {
 			s.logger.Infof("Sending <%s, %s, %d, %s>", response.Id, s.id, response.ReqNum, response.Response)
+		} else if msg.Type == "lfd" {
+			s.logger.Infof("<%d> Sent heartbeat to %s", response.ReqNum, response.Id)
 		}
 
 		respBytes, err := json.Marshal(response)
