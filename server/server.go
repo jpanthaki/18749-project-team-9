@@ -32,10 +32,13 @@ type server struct {
 
 	connections map[net.Conn]struct{} // Track active connections
 
+	lfdPort int
+	lfdConn net.Conn
+
 	logger *log.Logger
 }
 
-func NewServer(id string, port int, protocol string) (Server, error) {
+func NewServer(id string, port int, protocol string, lfdPort int) (Server, error) {
 	logger := log.NewWithOptions(os.Stderr, log.Options{
 		ReportTimestamp: true,
 	})
@@ -51,6 +54,8 @@ func NewServer(id string, port int, protocol string) (Server, error) {
 		closeCh:     make(chan struct{}),
 		connections: make(map[net.Conn]struct{}), // Initialize client map
 
+		lfdPort: lfdPort,
+
 		logger: logger,
 	}
 	return s, nil
@@ -64,12 +69,13 @@ func (s *server) Start() error {
 	}
 	s.listener = l
 	s.status = "running"
-	s.logger.Infof("Listening on %d", s.port)
+	s.logger.Infof("Listening on %s", s.listener.Addr().String())
 
 	ready := make(chan struct{})
 	// Start manager goroutine
 	go s.manager()
 	go s.listen(ready)
+	go s.connectToLFD()
 
 	// Wait for listener to be ready
 	<-ready
@@ -94,6 +100,9 @@ func (s *server) Stop() error {
 		s.logger.Infof("Closing connection %s on port %d", conn.RemoteAddr().String(), s.port)
 		conn.Close()
 	}
+	if s.lfdConn != nil {
+		s.lfdConn.Close()
+	}
 	close(s.closeCh) // Signal manager goroutine to exit
 	s.logger.Infof("Server %s stopped successfully!", s.id)
 	return nil
@@ -105,6 +114,19 @@ func (s *server) Status() string {
 
 func (s *server) Ready() bool {
 	return s.isReady
+}
+
+func (s *server) connectToLFD() {
+	conn, err := net.Dial(s.protocol, ":"+strconv.Itoa(s.lfdPort))
+	if err != nil {
+		s.logger.Warnf("Error connecting to LFD on port %d: %v", s.lfdPort, err)
+		return
+	}
+	s.logger.Infof("Connected to LFD on port %d", s.lfdPort)
+
+	s.lfdConn = conn
+
+	go s.handleConnection(conn)
 }
 
 func (s *server) listen(readyCh chan struct{}) {

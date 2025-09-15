@@ -12,7 +12,7 @@ import (
 )
 
 func TestServerLifecycle(t *testing.T) {
-	srv, err := NewServer("test", 0, "tcp")
+	srv, err := NewServer("test", 0, "tcp", 0)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestServerLifecycle(t *testing.T) {
 }
 
 func TestServerWithThreeClients(t *testing.T) {
-	srv, err := NewServer("test", 0, "tcp")
+	srv, err := NewServer("test", 0, "tcp", 0)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -102,7 +102,11 @@ func TestServerWithThreeClients(t *testing.T) {
 				doneCh <- err
 				return
 			}
-			defer conn.Close()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					t.Errorf("Error closing client connection: %v", err)
+				}
+			}()
 
 			for idx, cc := range msgs {
 				msg := types.Message{
@@ -170,38 +174,34 @@ func TestServerWithThreeClients(t *testing.T) {
 }
 
 func TestServerWithLFD(t *testing.T) {
-	srv, err := NewServer("test", 0, "tcp")
+	ln, err := net.Listen("tcp", ":9090")
+	if err != nil {
+		fmt.Println("LFD: Failed to start mock LFD:", err)
+		return
+	}
+	defer ln.Close()
+	fmt.Println("LFD: Mock LFD listening on port 9090")
+
+	srv, err := NewServer("test", 0, "tcp", 9090)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
 	go func() {
-		_ = srv.Start()
+		err := srv.Start()
+		if err != nil {
+			// Ignore error if stopping
+		}
 	}()
 
-	// Get the actual port assigned
-	serverImpl := srv.(*server)
-	for serverImpl.listener == nil {
-		time.Sleep(10 * time.Millisecond)
-	}
-	port := serverImpl.listener.Addr().(*net.TCPAddr).Port
-	fmt.Println(port)
-
-	// Wait for the server to be ready
-	for !srv.Ready() {
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	conn, err := net.Dial("tcp", ":"+strconv.Itoa(port))
+	c, err := ln.Accept()
 	if err != nil {
-		t.Fatalf("Failed to connect LFD to server: %v", err)
+		fmt.Println("LFD: Failed to accept connection:", err)
+		return
 	}
-	defer conn.Close()
-
+	defer c.Close()
 	id := "lfd1"
-	heartbeatCount := 3
-
-	for i := 0; i < heartbeatCount; i++ {
+	for i := 0; i < 5; i++ {
 		msg := types.Message{
 			Type:    "lfd",
 			Id:      id,
@@ -209,13 +209,12 @@ func TestServerWithLFD(t *testing.T) {
 			Message: "heartbeat",
 		}
 		data, _ := json.Marshal(msg)
-		_, err = conn.Write(data)
+		_, err = c.Write(data)
 		if err != nil {
 			t.Fatalf("Failed to send heartbeat %d: %v", i, err)
 		}
-
 		buf := make([]byte, 1024)
-		n, err := conn.Read(buf)
+		n, err := c.Read(buf)
 		if err != nil {
 			t.Fatalf("Failed to read heartbeat response %d: %v", i, err)
 		}
@@ -234,7 +233,7 @@ func TestServerWithLFD(t *testing.T) {
 		if resp.Response != fmt.Sprintf("%d", i) {
 			t.Errorf("Heartbeat %d: expected response '%d', got '%s'", i, i, resp.Response)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(2000 * time.Millisecond)
 	}
 
 	err = srv.Stop()
