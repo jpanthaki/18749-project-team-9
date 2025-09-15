@@ -12,11 +12,13 @@ import (
 func main() {
 	id := flag.String("id", "S1", "id of the server")
 	port := flag.Int("port", 8080, "port of the server")
+	lfdPort := flag.Int("lfdPort", 0, "port of the local failure detector (0 if none)")
+	protocol := flag.String("protocol", "tcp", "protocol of the server (tcp/udp)")
 	flag.Parse()
 
-	fmt.Printf("Starting server with ID: %s, Port: %d, Protocol: %s\n", *id, *port, "tcp")
+	fmt.Printf("Starting server with ID: %s, Port: %d, Protocol: %s\n", *id, *port, *protocol)
 
-	sv, err := server.NewServer("S1", 8080, "tcp")
+	sv, err := server.NewServer("S1", *port, *protocol, *lfdPort)
 	if err != nil {
 		panic(err)
 	}
