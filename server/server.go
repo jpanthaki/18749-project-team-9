@@ -1,25 +1,20 @@
 package server
 
 import (
+	"18749-team9/types"
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 
-	"18749-team9/types"
+	"github.com/charmbracelet/log"
 )
 
-type clientMessage struct {
+type internalMessage struct {
 	id         string
 	message    types.Message
 	responseCh chan types.Response
-}
-
-type Server interface {
-	Start() error
-	Stop() error
-	Status() string
-	Ready() bool
 }
 
 type server struct {
@@ -31,14 +26,19 @@ type server struct {
 	state   map[string]int
 	isReady bool
 	status  string
-	msgCh   chan clientMessage
+	msgCh   chan internalMessage
 	readyCh chan chan bool
 	closeCh chan struct{}
 
 	connections map[net.Conn]struct{} // Track active connections
+
+	logger *log.Logger
 }
 
 func NewServer(id string, port int, protocol string) (Server, error) {
+	logger := log.NewWithOptions(os.Stderr, log.Options{
+		ReportTimestamp: true,
+	})
 	s := &server{
 		id:       id,
 		port:     port,
@@ -47,22 +47,24 @@ func NewServer(id string, port int, protocol string) (Server, error) {
 		isReady:  false,
 		status:   "stopped",
 
-		msgCh:       make(chan clientMessage),
+		msgCh:       make(chan internalMessage),
 		closeCh:     make(chan struct{}),
 		connections: make(map[net.Conn]struct{}), // Initialize client map
+
+		logger: logger,
 	}
 	return s, nil
 }
 
 func (s *server) Start() error {
-	fmt.Println(s.port)
 	l, err := net.Listen(s.protocol, ":"+strconv.Itoa(s.port))
 	if err != nil {
+		s.logger.Errorf("Error starting listener on server %s: %v", s.id, err)
 		return err
 	}
 	s.listener = l
 	s.status = "running"
-	fmt.Printf("Listening on %d\n", s.port)
+	s.logger.Infof("Listening on %d", s.port)
 
 	ready := make(chan struct{})
 	// Start manager goroutine
@@ -80,17 +82,20 @@ func (s *server) Stop() error {
 	if s.status != "running" {
 		return fmt.Errorf("server not running")
 	}
-	fmt.Println("Stopping server...")
+	s.logger.Infof("Stopping server %s...", s.id)
 	s.status = "stopped"
 	s.isReady = false
 	if s.listener != nil {
+		s.logger.Infof("Closing server %s listener on port %d", s.id, s.port)
 		s.listener.Close() // This will cause Accept() to return an error and exit Start()
 	}
 	// Close all active connections
 	for conn := range s.connections {
+		s.logger.Infof("Closing connection %s on port %d", conn.RemoteAddr().String(), s.port)
 		conn.Close()
 	}
 	close(s.closeCh) // Signal manager goroutine to exit
+	s.logger.Infof("Server %s stopped successfully!", s.id)
 	return nil
 }
 
@@ -110,7 +115,7 @@ func (s *server) listen(readyCh chan struct{}) {
 		if err != nil {
 			return
 		}
-		fmt.Println("connected to a client")
+		s.logger.Infof("Connected to a client with address %s", conn.RemoteAddr().String())
 
 		s.connections[conn] = struct{}{} // Add the new connection to the clients map
 
@@ -127,15 +132,19 @@ func (s *server) manager() {
 			case "client":
 				switch msg.message.Message {
 				case "Init":
+					s.logger.Infof("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.state[msg.id] = 0
+					s.logger.Infof("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("Client: %s Initialized, State: %d", msg.id, s.state[msg.id])}
 				case "CountUp":
+					s.logger.Infof("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.state[msg.id]++
-					fmt.Println("State after CountUp:", s.state)
+					s.logger.Infof("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Up, State: %d}", msg.id, s.state[msg.id])}
 				case "CountDown":
+					s.logger.Infof("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.state[msg.id]--
-					fmt.Println("State after CountDown:", s.state)
+					s.logger.Infof("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Down, State: %d}", msg.id, s.state[msg.id])}
 				case "Close":
 					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
@@ -161,32 +170,42 @@ func (s *server) handleConnection(conn net.Conn) {
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)
 		if err != nil {
+			s.logger.Warnf("Error reading from connection: %v", err)
 			return
 		}
 		var msg types.Message
 		err = json.Unmarshal(buf[:n], &msg)
 		if err != nil {
+			s.logger.Warnf("Error unmarshalling message from connection: %v", err)
 			return
 		}
-		fmt.Println("Received message:", msg)
 
-		request := clientMessage{
+		if msg.Type == "client" {
+			s.logger.Infof("Received <%s, %s, %d, %s>", msg.Id, s.id, msg.ReqNum, msg.Message)
+		}
+
+		request := internalMessage{
 			id:         msg.Id,
 			message:    msg,
 			responseCh: make(chan types.Response),
 		}
-		fmt.Printf("Request: %+v\n", msg)
+
 		s.msgCh <- request
 		response := <-request.responseCh
-		fmt.Printf("Response: %+v\n", response)
+
+		if msg.Type == "client" {
+			s.logger.Infof("Sending <%s, %s, %d, %s>", response.Id, s.id, response.ReqNum, response.Response)
+		}
 
 		respBytes, err := json.Marshal(response)
 		if err != nil {
+			s.logger.Warnf("Error marshalling response from connection: %v", err)
 			return
 		}
 
 		_, err = conn.Write(respBytes)
 		if err != nil {
+			s.logger.Warnf("Error writing to connection: %v", err)
 			return
 		}
 	}
