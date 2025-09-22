@@ -1,11 +1,10 @@
-package main
+package helpers
 
 import (
-	"fmt"
 	"net"
 )
 
-func getLocalIP() string {
+func GetLocalIP() string {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		panic(err)
@@ -14,8 +13,4 @@ func getLocalIP() string {
 
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP.String()
-}
-
-func main() {
-	fmt.Println(getLocalIP())
 }

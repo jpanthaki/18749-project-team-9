@@ -1,6 +1,7 @@
 package main
 
 import (
+	"18749-team9/helpers"
 	"18749-team9/server"
 	"bufio"
 	"flag"
@@ -12,11 +13,11 @@ import (
 func main() {
 	id := flag.String("id", "S1", "id of the server")
 	port := flag.Int("port", 8080, "port of the server")
-	lfdPort := flag.Int("lfdPort", 0, "port of the local failure detector (0 if none)")
+	lfdPort := flag.Int("lfdPort", 9000, "port of the local failure detector (0 if none)")
 	protocol := flag.String("protocol", "tcp", "protocol of the server (tcp/udp)")
 	flag.Parse()
 
-	fmt.Printf("Starting server with ID: %s, Port: %d, Protocol: %s\n", *id, *port, *protocol)
+	fmt.Printf("Starting server at IP address %s with ID: %s, Port: %d, Protocol: %s\n", helpers.GetLocalIP(), *id, *port, *protocol)
 
 	sv, err := server.NewServer("S1", *port, *protocol, *lfdPort)
 	if err != nil {

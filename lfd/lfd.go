@@ -16,36 +16,47 @@ type Lfd interface {
 }
 
 type lfd struct {
-	id                  string
-	heartbeat_count     int
-	heartbeat_frequency int
-	port                int
-	protocol            string
-	status              string
-	conn                net.Conn
-	closeCh             chan struct{}
+	id                 string
+	heartbeatCount     int
+	heartbeatFrequency int
+	port               int
+	protocol           string
+	status             string
+	conn               net.Conn
+	closeCh            chan struct{}
 }
 
 func NewLfd(heartbeat_frequency int, id string, port int, protocol string) (Lfd, error) {
 	l := &lfd{
-		id:                  id,
-		port:                port,
-		protocol:            protocol,
-		status:              "stopped",
-		heartbeat_count:     1,
-		heartbeat_frequency: heartbeat_frequency,
-		closeCh:             make(chan struct{}),
+		id:                 id,
+		port:               port,
+		protocol:           protocol,
+		status:             "stopped",
+		heartbeatCount:     1,
+		heartbeatFrequency: heartbeat_frequency,
+		closeCh:            make(chan struct{}),
 	}
 	return l, nil
 }
 
 func (l *lfd) Start() error {
 	addr := ":" + strconv.Itoa(l.port)
-	conn, err := net.Dial(l.protocol, addr)
+	//conn, err := net.Dial(l.protocol, addr)
+	//if err != nil {
+	//	return fmt.Errorf("failed to connect to server: %w", err)
+	//}
+	//l.conn = conn
+	listener, err := net.Listen(l.protocol, addr)
 	if err != nil {
-		return fmt.Errorf("failed to connect to server: %w", err)
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+	}
+	fmt.Printf("[%s] %s listening on port %d\n", time.Now().Format("2006-01-02 15:04:05"), l.id, l.port)
+	conn, err := listener.Accept()
+	if err != nil {
+		return fmt.Errorf("failed to accept connection: %w", err)
 	}
 	l.conn = conn
+
 	l.status = "running"
 	fmt.Printf("[%s] %s connected to server on port %d\n", time.Now().Format("2006-01-02 15:04:05"), l.id, l.port)
 	for {
@@ -59,7 +70,7 @@ func (l *lfd) Start() error {
 				l.conn.Close()
 				return fmt.Errorf("heartbeat failed: %w", err)
 			}
-			time.Sleep(time.Duration(l.heartbeat_frequency) * time.Second)
+			time.Sleep(time.Duration(l.heartbeatFrequency) * time.Second)
 		}
 	}
 }
@@ -82,7 +93,7 @@ func (l *lfd) Heartbeat() error {
 	msg := types.Message{
 		Type:    "lfd",
 		Id:      l.id,
-		ReqNum:  l.heartbeat_count,
+		ReqNum:  l.heartbeatCount,
 		Message: "heartbeat",
 	}
 	data, err := json.Marshal(msg)
@@ -91,24 +102,24 @@ func (l *lfd) Heartbeat() error {
 	}
 	_, err = l.conn.Write(data)
 	now := time.Now().Format("2006-01-02 15:04:05")
-	fmt.Printf("[%s] [%d] %s sending heartbeat to %s\n", now, l.heartbeat_count, l.id, "S1")
+	fmt.Printf("[%s] [%d] %s sending heartbeat to %s\n", now, l.heartbeatCount, l.id, "S1")
 	if err != nil {
 		return fmt.Errorf("failed to send heartbeat: %w", err)
 	}
-	l.conn.SetReadDeadline(time.Now().Add(time.Duration(l.heartbeat_frequency) * time.Second))
+	l.conn.SetReadDeadline(time.Now().Add(time.Duration(l.heartbeatFrequency) * time.Second))
 	buf := make([]byte, 1024)
 	n, err := l.conn.Read(buf)
 	if err != nil {
-		fmt.Printf("[%s] [%d] %s: Heartbeat to %s failed (%v)\n", now, l.heartbeat_count, l.id, "S1", err)
+		fmt.Printf("[%s] [%d] %s: Heartbeat to %s failed (%v)\n", now, l.heartbeatCount, l.id, "S1", err)
 		return fmt.Errorf("no response from server: %w", err)
 	}
-	fmt.Printf("[%s] [%d] %s receives heartbeat from %s\n", now, l.heartbeat_count, l.id, "S1")
+	fmt.Printf("[%s] [%d] %s receives heartbeat from %s\n", now, l.heartbeatCount, l.id, "S1")
 	var resp types.Response
 	err = json.Unmarshal(buf[:n], &resp)
 	if err != nil {
 		return fmt.Errorf("invalid response from server: %w", err)
 	}
 	fmt.Printf("Received response: %+v\n", resp)
-	l.heartbeat_count++
+	l.heartbeatCount++
 	return nil
 }
