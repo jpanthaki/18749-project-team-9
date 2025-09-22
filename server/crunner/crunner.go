@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"flag"
 )
 
 // this is just to test client-server interaction for now...
 func main() {
-	serverAddr := "127.0.0.1:8080"
+	id := flag.String("id", "client1", "id of the client")
+	flag.Parse()
+	serverAddr := "172.26.111.238:8080"
 	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
 		fmt.Println("Failed to connect to server:", err)
@@ -23,7 +26,6 @@ func main() {
 	fmt.Println("Connected to server at", serverAddr)
 	fmt.Println("Enter message type (Init, CountUp, CountDown, Close) or 'exit' to quit:")
 
-	id := "client1"
 	reqNum := 0
 
 	for {
@@ -37,7 +39,7 @@ func main() {
 
 		msg := types.Message{
 			Type:    "client",
-			Id:      id,
+			Id:      *id,
 			ReqNum:  reqNum,
 			Message: input,
 		}
