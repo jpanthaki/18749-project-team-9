@@ -117,16 +117,17 @@ func (s *server) Ready() bool {
 }
 
 func (s *server) connectToLFD() {
-	conn, err := net.Dial(s.protocol, ":"+strconv.Itoa(s.lfdPort))
-	if err != nil {
-		s.logger.Warnf("Error connecting to LFD on port %d: %v", s.lfdPort, err)
-		return
+	for {
+		conn, err := net.Dial(s.protocol, ":"+strconv.Itoa(s.lfdPort))
+		if err == nil {
+			s.logger.Infof("Connected to LFD on port %d", s.lfdPort)
+
+			s.lfdConn = conn
+
+			go s.handleConnection(conn)
+			return
+		}
 	}
-	s.logger.Infof("Connected to LFD on port %d", s.lfdPort)
-
-	s.lfdConn = conn
-
-	go s.handleConnection(conn)
 }
 
 func (s *server) listen(readyCh chan struct{}) {
