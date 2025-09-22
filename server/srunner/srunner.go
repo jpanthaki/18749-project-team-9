@@ -14,7 +14,7 @@ func main() {
 	id := flag.String("id", "S1", "id of the server")
 	port := flag.Int("port", 8080, "port of the server")
 	lfdPort := flag.Int("lfdPort", 9000, "port of the local failure detector (0 if none)")
-	protocol := flag.String("protocol", "tcp", "protocol of the server (tcp/udp)")
+	protocol := flag.String("protocol", "tcp", "protocol of the server")
 	flag.Parse()
 
 	fmt.Printf("Starting server at IP address %s with ID: %s, Port: %d, Protocol: %s\n", helpers.GetLocalIP(), *id, *port, *protocol)

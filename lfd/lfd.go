@@ -26,14 +26,14 @@ type lfd struct {
 	closeCh            chan struct{}
 }
 
-func NewLfd(heartbeat_frequency int, id string, port int, protocol string) (Lfd, error) {
+func NewLfd(heartbeatFrequency int, id string, port int, protocol string) (Lfd, error) {
 	l := &lfd{
 		id:                 id,
 		port:               port,
 		protocol:           protocol,
 		status:             "stopped",
 		heartbeatCount:     1,
-		heartbeatFrequency: heartbeat_frequency,
+		heartbeatFrequency: heartbeatFrequency,
 		closeCh:            make(chan struct{}),
 	}
 	return l, nil
@@ -41,11 +41,6 @@ func NewLfd(heartbeat_frequency int, id string, port int, protocol string) (Lfd,
 
 func (l *lfd) Start() error {
 	addr := ":" + strconv.Itoa(l.port)
-	//conn, err := net.Dial(l.protocol, addr)
-	//if err != nil {
-	//	return fmt.Errorf("failed to connect to server: %w", err)
-	//}
-	//l.conn = conn
 	listener, err := net.Listen(l.protocol, addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
