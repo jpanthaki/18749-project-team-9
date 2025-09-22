@@ -3,6 +3,7 @@ package main
 import (
 	"18749-team9/client"
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -11,21 +12,22 @@ import (
 
 func main() {
 	// Simple manual flag parsing to keep deps minimal
-	addr := "127.0.0.1:8080"
-	id := "C1"
-	serverID := "S1"
-	startReq := 101
-	timeout := 3 * time.Second
+	addr := flag.String("addr", "127.0.0.1:8080", "server address")
+	id := flag.String("id", "C1", "client id")
+	serverID := flag.String("serverID", "S1", "server id to connect to")
+	startReq := flag.Int("startReq", 101, "starting request number")
+	timeout := flag.Duration("timeout", 3*time.Second, "request timeout duration")
+	flag.Parse()
 
 	// Allow override via env or quick edits if you want,
 	// or switch to the 'flag' package like earlier suggestion.
 
 	cl, err := client.New(client.Options{
-		Addr:        addr,
-		ID:          id,
-		ServerID:    serverID,
-		StartingReq: startReq,
-		Timeout:     timeout,
+		Addr:        *addr,
+		ID:          *id,
+		ServerID:    *serverID,
+		StartingReq: *startReq,
+		Timeout:     *timeout,
 	})
 	if err != nil {
 		fmt.Println("Client init error:", err)
@@ -33,7 +35,7 @@ func main() {
 	}
 	defer cl.Close()
 
-	fmt.Printf("Connected %s → %s (%s)\n", id, addr, serverID)
+	fmt.Printf("Connected %s → %s (%s)\n", *id, *addr, *serverID)
 	fmt.Println("Enter: Init | CountUp | CountDown | Close | exit")
 
 	in := bufio.NewScanner(os.Stdin)
