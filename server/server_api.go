@@ -1,7 +1,7 @@
 package server
 
 type Server interface {
-	// start the server. This function will block until the server is ready to accept connections.
+	// start the server.
 	Start() error
 	// stop the server. This function will close all active connections and stop the server.
 	Stop() error
