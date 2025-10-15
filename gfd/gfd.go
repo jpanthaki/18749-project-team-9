@@ -1,10 +1,12 @@
 package gfd
 
 import (
+	log "18749-team9/logger"
 	"18749-team9/types"
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 )
 
 type gfd struct {
@@ -23,6 +25,8 @@ type gfd struct {
 		responseCh chan types.Response
 	}
 	closeCh chan struct{}
+
+	logger *log.Logger
 }
 
 func NewGfd(port int, protocol string) (*gfd, error) {
@@ -38,6 +42,7 @@ func NewGfd(port int, protocol string) (*gfd, error) {
 			responseCh chan types.Response
 		}),
 		closeCh: make(chan struct{}),
+		logger:  log.New("GFD"),
 	}
 	return g, nil
 }
@@ -45,7 +50,7 @@ func NewGfd(port int, protocol string) (*gfd, error) {
 func (g *gfd) Start() error {
 	l, err := net.Listen(g.protocol, fmt.Sprintf(":%d", g.port))
 	if err != nil {
-		return fmt.Errorf("failed to listen on port %d: %w", g.port)
+		return fmt.Errorf("failed to listen on port %d: %w", g.port, err)
 	}
 
 	g.listener = l
@@ -77,23 +82,51 @@ func (g *gfd) manager() {
 		select {
 		case msg := <-g.msgCh:
 			var resp types.Response
+			var logMsg string
 			switch msg.message.Message {
 			case "add":
 				g.membership[msg.id] = true
 				g.memberCount++
+				livingServers := strings.Join(func(m map[string]bool) []string {
+					var s []string
+					for k, v := range m {
+						if v {
+							s = append(s, k)
+						}
+					}
+					return s
+				}(g.membership), ",")
 				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Response: "Added"}
+				msg.responseCh <- resp
+				logMsg = fmt.Sprintf("Adding server %s.\nGFD: %d members: %s", msg.id, g.memberCount, livingServers)
+				g.logger.Log(logMsg, "AddingServer")
 			case "remove":
 				g.membership[msg.id] = false
 				g.memberCount--
+				livingServers := strings.Join(func(m map[string]bool) []string {
+					var s []string
+					for k, v := range m {
+						if v {
+							s = append(s, k)
+						}
+					}
+					return s
+				}(g.membership), ",")
 				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Response: "Removed"}
+				msg.responseCh <- resp
+				logMsg = fmt.Sprintf("Removing server %s.\nGFD: %d members: %s", msg.id, g.memberCount, livingServers)
+				g.logger.Log(logMsg, "RemovingServer")
 			case "heartbeat":
+				logMsg = fmt.Sprintf("[%d] GFD receives heartbeat from %s", msg.message.ReqNum, msg.id)
+				g.logger.Log(logMsg, "LFDHeartbeatReceived")
 				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Alive"}
+				msg.responseCh <- resp
+				logMsg = fmt.Sprintf("[%d] GFD sending heartbeat ACK to %s", msg.message.ReqNum, msg.id)
+				g.logger.Log(logMsg, "LFDHeartbeatSent")
 			}
-			msg.responseCh <- resp
 		case <-g.closeCh:
 			return
 		}
-
 	}
 }
 
