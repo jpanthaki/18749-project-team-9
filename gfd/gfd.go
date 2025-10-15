@@ -98,7 +98,7 @@ func (g *gfd) manager() {
 				}(g.membership), ",")
 				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Response: "Added"}
 				msg.responseCh <- resp
-				logMsg = fmt.Sprintf("Adding server %s.\nGFD: %d members: %s", msg.id, g.memberCount, livingServers)
+				logMsg = fmt.Sprintf("Adding server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
 				g.logger.Log(logMsg, "AddingServer")
 			case "remove":
 				g.membership[msg.id] = false
@@ -114,7 +114,7 @@ func (g *gfd) manager() {
 				}(g.membership), ",")
 				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Response: "Removed"}
 				msg.responseCh <- resp
-				logMsg = fmt.Sprintf("Removing server %s.\nGFD: %d members: %s", msg.id, g.memberCount, livingServers)
+				logMsg = fmt.Sprintf("Removing server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
 				g.logger.Log(logMsg, "RemovingServer")
 			case "heartbeat":
 				logMsg = fmt.Sprintf("[%d] GFD receives heartbeat from %s", msg.message.ReqNum, msg.id)
