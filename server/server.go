@@ -11,12 +11,6 @@ import (
 	"github.com/charmbracelet/log"
 )
 
-type internalMessage struct {
-	id         string
-	message    types.Message
-	responseCh chan types.Response
-}
-
 type server struct {
 	id       string
 	port     int
@@ -26,7 +20,11 @@ type server struct {
 	state   map[string]int
 	isReady bool
 	status  string
-	msgCh   chan internalMessage
+	msgCh   chan struct {
+		id         string
+		message    types.Message
+		responseCh chan types.Response
+	}
 	readyCh chan chan bool
 	closeCh chan struct{}
 
@@ -50,7 +48,11 @@ func NewServer(id string, port int, protocol string, lfdPort int) (Server, error
 		isReady:  false,
 		status:   "stopped",
 
-		msgCh:       make(chan internalMessage),
+		msgCh: make(chan struct {
+			id         string
+			message    types.Message
+			responseCh chan types.Response
+		}),
 		closeCh:     make(chan struct{}),
 		connections: make(map[net.Conn]struct{}), // Initialize client map
 
@@ -209,7 +211,11 @@ func (s *server) handleConnection(conn net.Conn) {
 			s.logger.Infof("<%d> Received heartbeat from %s", msg.ReqNum, msg.Id)
 		}
 
-		request := internalMessage{
+		request := struct {
+			id         string
+			message    types.Message
+			responseCh chan types.Response
+		}{
 			id:         msg.Id,
 			message:    msg,
 			responseCh: make(chan types.Response),

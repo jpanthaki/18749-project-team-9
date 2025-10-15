@@ -13,8 +13,3 @@ type Response struct {
 	ReqNum   int    `json:"req_num"` //heartbeat count for lfd
 	Response string `json:"response"`
 }
-
-type LFDMessage struct {
-	Id           string `json:"id"`
-	HeartbeatCnt int    `json:"heartbeat_cnt"`
-}
