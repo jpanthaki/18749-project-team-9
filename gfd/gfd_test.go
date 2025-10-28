@@ -1,7 +1,6 @@
 package gfd
 
 import (
-	"18749-team9/logger"
 	"18749-team9/types"
 	"encoding/json"
 	"net"
@@ -15,14 +14,14 @@ func TestGfdLifecycle_AddRemoveHeartbeat(t *testing.T) {
 		t.Fatalf("failed to create GFD: %v", err)
 	}
 
-	g.logger = logger.New("GFD")
+	g_star := g.(*gfd)
 
 	if err := g.Start(); err != nil {
 		t.Fatalf("failed to start GFD: %v", err)
 	}
 	defer g.Stop()
 
-	addr := g.listener.Addr().String()
+	addr := g_star.listener.Addr().String()
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -116,14 +115,15 @@ func TestFullGFDScenario(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create GFD: %v", err)
 	}
-	g.logger = logger.New("GFD")
+
+	g_star := g.(*gfd)
 
 	if err := g.Start(); err != nil {
 		t.Fatalf("failed to start GFD: %v", err)
 	}
 	defer g.Stop()
 
-	addr := g.listener.Addr().String()
+	addr := g_star.listener.Addr().String()
 	time.Sleep(200 * time.Millisecond)
 
 	for i := 1; i <= 3; i++ {
@@ -142,11 +142,11 @@ func TestFullGFDScenario(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if g.memberCount != 3 {
-		t.Fatalf("expected 3 members, got %d", g.memberCount)
+	if g_star.memberCount != 3 {
+		t.Fatalf("expected 3 members, got %d", g_star.memberCount)
 	}
 	for _, id := range []string{"S1", "S2", "S3"} {
-		if !g.membership[id] {
+		if !g_star.membership[id] {
 			t.Fatalf("expected %s to be in membership", id)
 		}
 	}
@@ -164,18 +164,18 @@ func TestFullGFDScenario(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	if g.memberCount != 2 {
-		t.Fatalf("expected 2 members after removal, got %d", g.memberCount)
+	if g_star.memberCount != 2 {
+		t.Fatalf("expected 2 members after removal, got %d", g_star.memberCount)
 	}
-	if g.membership["S1"] {
+	if g_star.membership["S1"] {
 		t.Fatalf("expected S1 to be false in membership map")
 	}
 
 	for _, id := range []string{"S2", "S3"} {
-		if !g.membership[id] {
+		if !g_star.membership[id] {
 			t.Fatalf("%s should still be active after removal", id)
 		}
 	}
 
-	t.Logf("GFD scenario test passed: final members = %v", g.membership)
+	t.Logf("GFD scenario test passed: final members = %v", g_star.membership)
 }

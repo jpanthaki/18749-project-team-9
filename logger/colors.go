@@ -33,6 +33,7 @@ var componentColors = map[string]map[string]string{
 		"StatusChange":            RGB(255, 80, 80),
 	},
 	"GFD": {
+		"GFDStarted":           RGB(255, 255, 0),
 		"LFDHeartbeatReceived": RGB(255, 120, 255),
 		"LFDHeartbeatSent":     RGB(200, 60, 200),
 		"LFDMessageReceived":   RGB(80, 255, 200),

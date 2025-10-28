@@ -19,7 +19,7 @@ func main() {
 
 	fmt.Printf("Starting server at IP address %s with ID: %s, Port: %d, Protocol: %s\n", helpers.GetLocalIP(), *id, *port, *protocol)
 
-	sv, err := server.NewServer("S1", *port, *protocol, *lfdPort)
+	sv, err := server.NewServer(*id, *port, *protocol, *lfdPort)
 	if err != nil {
 		panic(err)
 	}

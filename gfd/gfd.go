@@ -60,6 +60,8 @@ func (g *gfd) Start() error {
 	go g.listen(ready)
 
 	<-ready
+	logMsg := fmt.Sprintf("GFD: %d members", g.memberCount)
+	g.logger.Log(logMsg, "GFDStarted")
 	return nil
 }
 
