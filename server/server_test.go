@@ -135,7 +135,7 @@ func TestServerWithThreeClients(t *testing.T) {
 					return
 				}
 
-				if resp.Id != cc.id {
+				if resp.Id != "test" {
 					doneCh <- fmt.Errorf("Client %s: expected id %s, got %s", clientID, cc.id, resp.Id)
 					return
 				}

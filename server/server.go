@@ -152,25 +152,25 @@ func (s *server) manager() {
 					s.state[msg.id] = 0
 					logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.logger.Log(logMsg, "StateAfter")
-					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("Client: %s Initialized, State: %d", msg.id, s.state[msg.id])}
+					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("Client: %s Initialized, State: %d", msg.id, s.state[msg.id])}
 				case "CountUp":
 					logMsg = fmt.Sprintf("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.logger.Log(logMsg, "StateBefore")
 					s.state[msg.id]++
 					logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.logger.Log(logMsg, "StateAfter")
-					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Up, State: %d}", msg.id, s.state[msg.id])}
+					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Up, State: %d}", msg.id, s.state[msg.id])}
 				case "CountDown":
 					logMsg = fmt.Sprintf("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.logger.Log(logMsg, "StateBefore")
 					s.state[msg.id]--
 					logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.logger.Log(logMsg, "StateAfter")
-					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Down, State: %d}", msg.id, s.state[msg.id])}
+					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Down, State: %d}", msg.id, s.state[msg.id])}
 				case "Close":
-					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
+					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
 				default:
-					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
+					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
 				}
 				logMsg = fmt.Sprintf("Sending <%s, %s, %d, %s>", resp.Id, s.id, resp.ReqNum, resp.Response)
 				s.logger.Log(logMsg, "MessageSent")
