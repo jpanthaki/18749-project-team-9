@@ -14,12 +14,13 @@ func main() {
 	serverID := flag.String("serverid", "S1", "Server replica id")
 	port := flag.Int("port", 9000, "LFD port")
 	gfdPort := flag.Int("gfdport", 8000, "GFD port")
+	gfdAddr := flag.String("gfdaddr", "127.0.0.1:8000", "GFD address")
 	protocol := flag.String("protocol", "tcp", "protocol")
 	flag.Parse()
 
 	fmt.Println("LFD IP: ", helpers.GetLocalIP())
 
-	lfd_ex, err := lfd.NewLfd(*freq, *id, *serverID, *port, *protocol, *gfdPort)
+	lfd_ex, err := lfd.NewLfd(*freq, *id, *serverID, *port, *protocol, *gfdPort, *gfdAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
