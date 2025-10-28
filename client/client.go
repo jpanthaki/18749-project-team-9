@@ -174,7 +174,7 @@ func (c *Client) SendAll(command string) (*types.Response, error) {
 			st.alive = false
 			continue
 		}
-		logMsg = fmt.Sprintf("[%s] Sent <%s, %s, %d, request>\n", ts(), c.id, st.rid, cur)
+		logMsg = fmt.Sprintf("[%s] Sent <%s, %s, %d, request>", ts(), c.id, st.rid, cur)
 		c.logger.Log(logMsg, "MessageSent")
 	}
 	c.mu.Unlock()
@@ -212,26 +212,26 @@ func (c *Client) SendAll(command string) (*types.Response, error) {
 
 			switch {
 			case rnum < cur:
-				logMsg = fmt.Sprintf("[%s] request_num %d: Late/stale reply from %s discarded\n", ts(), rnum, rid)
+				logMsg = fmt.Sprintf("[%s] request_num %d: Late/stale reply from %s discarded", ts(), rnum, rid)
 				c.logger.Log(logMsg, "MessageReceived")
 			case rnum > cur:
 				// future reply (shouldn’t happen), ignore
 			default: // rnum == cur
 				if !seen[rid] {
 					if first == nil {
-						logMsg = fmt.Sprintf("[%s] Received <%s, %s, %d, reply>\n", ts(), c.id, rid, rnum)
+						logMsg = fmt.Sprintf("[%s] Received <%s, %s, %d, reply>", ts(), c.id, rid, rnum)
 						c.logger.Log(logMsg, "MessageReceived")
 						cp := tr.r
 						first = &cp
 						seen[rid] = true
 						// we can return soon; keep loop just a tad to catch very fast dups or break immediately
 					} else {
-						logMsg = fmt.Sprintf("[%s] request_num %d: Discarded duplicate reply from %s\n", ts(), rnum, rid)
+						logMsg = fmt.Sprintf("[%s] request_num %d: Discarded duplicate reply from %s", ts(), rnum, rid)
 						c.logger.Log(logMsg, "MessageReceived")
 						seen[rid] = true
 					}
 				} else {
-					logMsg = fmt.Sprintf("[%s] request_num %d: Discarded duplicate reply from %s\n", ts(), rnum, rid)
+					logMsg = fmt.Sprintf("[%s] request_num %d: Discarded duplicate reply from %s", ts(), rnum, rid)
 					c.logger.Log(logMsg, "MessageReceived")
 				}
 			}
