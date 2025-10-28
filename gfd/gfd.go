@@ -29,7 +29,7 @@ type gfd struct {
 	logger *log.Logger
 }
 
-func NewGfd(port int, protocol string) (*gfd, error) {
+func NewGfd(port int, protocol string) (Gfd, error) {
 	g := &gfd{
 		port:        port,
 		protocol:    protocol,

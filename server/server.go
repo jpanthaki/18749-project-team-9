@@ -65,7 +65,6 @@ func (s *server) Start() error {
 	}
 	s.listener = l
 	s.status = "running"
-	fmt.Printf("Listening on %s\n", s.listener.Addr().String())
 
 	ready := make(chan struct{})
 	// Start manager goroutine
