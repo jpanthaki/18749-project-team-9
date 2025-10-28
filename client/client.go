@@ -1,6 +1,7 @@
 package client
 
 import (
+	log "18749-team9/logger"
 	"18749-team9/types"
 	"bufio"
 	"encoding/json"
@@ -24,7 +25,7 @@ type Options struct {
 }
 
 type connState struct {
-	rid   string       // S1|S2|S3
+	rid   string // S1|S2|S3
 	addr  string
 	conn  net.Conn
 	dec   *json.Decoder
@@ -39,6 +40,8 @@ type Client struct {
 	mu     sync.Mutex
 	conns  map[string]*connState // rid -> state
 	respCh chan taggedResp
+
+	logger *log.Logger
 }
 
 type taggedResp struct {
@@ -59,6 +62,7 @@ func New(opts Options) (*Client, error) {
 		timeout: opts.Timeout,
 		conns:   make(map[string]*connState),
 		respCh:  make(chan taggedResp, 16),
+		logger:  log.New("Client"),
 	}
 
 	// Prepare connection map
@@ -142,6 +146,7 @@ func (c *Client) reader(st *connState) {
 func (c *Client) SendAll(command string) (*types.Response, error) {
 	// 1) Send to all alive
 	c.mu.Lock()
+	var logMsg string
 	cur := c.reqNum
 	for _, st := range c.conns {
 		if !st.alive {
@@ -169,7 +174,8 @@ func (c *Client) SendAll(command string) (*types.Response, error) {
 			st.alive = false
 			continue
 		}
-		fmt.Printf("[%s] Sent <%s, %s, %d, request>\n", ts(), c.id, st.rid, cur)
+		logMsg = fmt.Sprintf("[%s] Sent <%s, %s, %d, request>\n", ts(), c.id, st.rid, cur)
+		c.logger.Log(logMsg, "MessageSent")
 	}
 	c.mu.Unlock()
 
@@ -189,6 +195,7 @@ func (c *Client) SendAll(command string) (*types.Response, error) {
 
 		select {
 		case tr, ok := <-c.respCh:
+			var logMsg string
 			if !ok {
 				if first == nil {
 					return nil, fmt.Errorf("client closed")
@@ -205,23 +212,27 @@ func (c *Client) SendAll(command string) (*types.Response, error) {
 
 			switch {
 			case rnum < cur:
-				fmt.Printf("[%s] request_num %d: Late/stale reply from %s discarded\n", ts(), rnum, rid)
+				logMsg = fmt.Sprintf("[%s] request_num %d: Late/stale reply from %s discarded\n", ts(), rnum, rid)
+				c.logger.Log(logMsg, "MessageReceived")
 			case rnum > cur:
 				// future reply (shouldn’t happen), ignore
 			default: // rnum == cur
 				if !seen[rid] {
 					if first == nil {
-						fmt.Printf("[%s] Received <%s, %s, %d, reply>\n", ts(), c.id, rid, rnum)
+						logMsg = fmt.Sprintf("[%s] Received <%s, %s, %d, reply>\n", ts(), c.id, rid, rnum)
+						c.logger.Log(logMsg, "MessageReceived")
 						cp := tr.r
 						first = &cp
 						seen[rid] = true
 						// we can return soon; keep loop just a tad to catch very fast dups or break immediately
 					} else {
-						fmt.Printf("[%s] request_num %d: Discarded duplicate reply from %s\n", ts(), rnum, rid)
+						logMsg = fmt.Sprintf("[%s] request_num %d: Discarded duplicate reply from %s\n", ts(), rnum, rid)
+						c.logger.Log(logMsg, "MessageReceived")
 						seen[rid] = true
 					}
 				} else {
-					fmt.Printf("[%s] request_num %d: Discarded duplicate reply from %s\n", ts(), rnum, rid)
+					logMsg = fmt.Sprintf("[%s] request_num %d: Discarded duplicate reply from %s\n", ts(), rnum, rid)
+					c.logger.Log(logMsg, "MessageReceived")
 				}
 			}
 			if first != nil {
