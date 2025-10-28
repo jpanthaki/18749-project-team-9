@@ -1,14 +1,12 @@
 package server
 
 import (
+	log "18749-team9/logger"
 	"18749-team9/types"
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
-
-	"github.com/charmbracelet/log"
 )
 
 type server struct {
@@ -37,9 +35,6 @@ type server struct {
 }
 
 func NewServer(id string, port int, protocol string, lfdPort int) (Server, error) {
-	logger := log.NewWithOptions(os.Stderr, log.Options{
-		ReportTimestamp: true,
-	})
 	s := &server{
 		id:       id,
 		port:     port,
@@ -58,7 +53,7 @@ func NewServer(id string, port int, protocol string, lfdPort int) (Server, error
 
 		lfdPort: lfdPort,
 
-		logger: logger,
+		logger: log.New("Server"),
 	}
 	return s, nil
 }
@@ -66,12 +61,11 @@ func NewServer(id string, port int, protocol string, lfdPort int) (Server, error
 func (s *server) Start() error {
 	l, err := net.Listen(s.protocol, ":"+strconv.Itoa(s.port))
 	if err != nil {
-		s.logger.Errorf("Error starting listener on server %s: %v", s.id, err)
 		return err
 	}
 	s.listener = l
 	s.status = "running"
-	s.logger.Infof("Listening on %s", s.listener.Addr().String())
+	fmt.Printf("Listening on %s", s.listener.Addr().String())
 
 	ready := make(chan struct{})
 	// Start manager goroutine
@@ -90,23 +84,19 @@ func (s *server) Stop() error {
 	if s.status != "running" {
 		return fmt.Errorf("server not running")
 	}
-	s.logger.Infof("Stopping server %s...", s.id)
 	s.status = "stopped"
 	s.isReady = false
 	if s.listener != nil {
-		s.logger.Infof("Closing server %s listener on port %d", s.id, s.port)
-		s.listener.Close() // This will cause Accept() to return an error and exit Start()
+		s.listener.Close()
 	}
 	// Close all active connections
 	for conn := range s.connections {
-		s.logger.Infof("Closing connection %s on port %d", conn.RemoteAddr().String(), s.port)
 		conn.Close()
 	}
 	if s.lfdConn != nil {
 		s.lfdConn.Close()
 	}
 	close(s.closeCh) // Signal manager goroutine to exit
-	s.logger.Infof("Server %s stopped successfully!", s.id)
 	return nil
 }
 
@@ -122,7 +112,6 @@ func (s *server) connectToLFD() {
 	for {
 		conn, err := net.Dial(s.protocol, ":"+strconv.Itoa(s.lfdPort))
 		if err == nil {
-			s.logger.Infof("Connected to LFD on port %d", s.lfdPort)
 
 			s.lfdConn = conn
 
@@ -140,7 +129,6 @@ func (s *server) listen(readyCh chan struct{}) {
 		if err != nil {
 			return
 		}
-		s.logger.Infof("Connected to a client with address %s", conn.RemoteAddr().String())
 
 		s.connections[conn] = struct{}{} // Add the new connection to the clients map
 
@@ -153,34 +141,49 @@ func (s *server) manager() {
 		select {
 		case msg := <-s.msgCh:
 			var resp types.Response
+			var logMsg string
 			switch msg.message.Type {
 			case "client":
+				logMsg = fmt.Sprintf("Received <%s, %s, %d, %s>", msg.message.Id, s.id, msg.message.ReqNum, msg.message.Message)
+				s.logger.Log(logMsg, "MessageReceived")
 				switch msg.message.Message {
 				case "Init":
-					s.logger.Infof("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					logMsg = fmt.Sprintf("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					s.logger.Log(logMsg, "StateBefore")
 					s.state[msg.id] = 0
-					s.logger.Infof("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("Client: %s Initialized, State: %d", msg.id, s.state[msg.id])}
+					logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					s.logger.Log(logMsg, "StateAfter")
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("Client: %s Initialized, State: %d", msg.id, s.state[msg.id])}
 				case "CountUp":
-					s.logger.Infof("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					logMsg = fmt.Sprintf("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					s.logger.Log(logMsg, "StateBefore")
 					s.state[msg.id]++
-					s.logger.Infof("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Up, State: %d}", msg.id, s.state[msg.id])}
+					logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					s.logger.Log(logMsg, "StateAfter")
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Up, State: %d}", msg.id, s.state[msg.id])}
 				case "CountDown":
-					s.logger.Infof("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					logMsg = fmt.Sprintf("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					s.logger.Log(logMsg, "StateBefore")
 					s.state[msg.id]--
-					s.logger.Infof("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Down, State: %d}", msg.id, s.state[msg.id])}
+					logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
+					s.logger.Log(logMsg, "StateAfter")
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Down, State: %d}", msg.id, s.state[msg.id])}
 				case "Close":
-					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
 				default:
-					resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
+					resp = types.Response{Type: "client", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
 				}
+				logMsg = fmt.Sprintf("Sending <%s, %s, %d, %s>", resp.Id, s.id, resp.ReqNum, resp.Response)
+				s.logger.Log(logMsg, "MessageSent")
+				msg.responseCh <- resp
 			case "lfd":
+				logMsg = fmt.Sprintf("<%d> Received heartbeat from %s", msg.message.ReqNum, msg.message.Id)
+				s.logger.Log(logMsg, "HeartbeatReceived")
 				resp = types.Response{Type: "lfd", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
+				logMsg = fmt.Sprintf("<%d> Sent heartbeat to %s", resp.ReqNum, resp.Id)
+				s.logger.Log(logMsg, "HeartbeatSent")
+				msg.responseCh <- resp
 			}
-
-			msg.responseCh <- resp
 		case <-s.closeCh:
 			return
 		}
@@ -195,20 +198,12 @@ func (s *server) handleConnection(conn net.Conn) {
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)
 		if err != nil {
-			s.logger.Warnf("Error reading from connection: %v", err)
 			return
 		}
 		var msg types.Message
 		err = json.Unmarshal(buf[:n], &msg)
 		if err != nil {
-			s.logger.Warnf("Error unmarshalling message from connection: %v", err)
 			return
-		}
-
-		if msg.Type == "client" {
-			s.logger.Infof("Received <%s, %s, %d, %s>", msg.Id, s.id, msg.ReqNum, msg.Message)
-		} else if msg.Type == "lfd" {
-			s.logger.Infof("<%d> Received heartbeat from %s", msg.ReqNum, msg.Id)
 		}
 
 		request := struct {
@@ -224,21 +219,13 @@ func (s *server) handleConnection(conn net.Conn) {
 		s.msgCh <- request
 		response := <-request.responseCh
 
-		if msg.Type == "client" {
-			s.logger.Infof("Sending <%s, %s, %d, %s>", response.Id, s.id, response.ReqNum, response.Response)
-		} else if msg.Type == "lfd" {
-			s.logger.Infof("<%d> Sent heartbeat to %s", response.ReqNum, response.Id)
-		}
-
 		respBytes, err := json.Marshal(response)
 		if err != nil {
-			s.logger.Warnf("Error marshalling response from connection: %v", err)
 			return
 		}
 
 		_, err = conn.Write(respBytes)
 		if err != nil {
-			s.logger.Warnf("Error writing to connection: %v", err)
 			return
 		}
 	}
