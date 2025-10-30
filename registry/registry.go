@@ -6,12 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"time"
 )
 
 type message struct {
-	header string
-	body   map[string]string
+	Header string            `json:"header"`
+	Body   map[string]string `json:"body"`
 }
 
 type registry struct {
@@ -27,9 +26,10 @@ type registry struct {
 
 func NewRegistry(port int, token string) (Registry, error) {
 	reg := &registry{
-		port:  port,
-		table: make(map[string]map[string]string),
-		token: token,
+		port:    port,
+		table:   make(map[string]map[string]string),
+		token:   token,
+		closeCh: make(chan struct{}),
 	}
 
 	return reg, nil
@@ -46,12 +46,14 @@ func (r *registry) Stop() error {
 }
 
 func (r *registry) manager() {
-	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", r.port))
+	addr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf(":%d", r.port))
 	if err != nil {
 		return
 	}
 
-	conn, err := net.ListenUDP("udp", addr)
+	fmt.Println(addr)
+
+	conn, err := net.ListenUDP("udp4", addr)
 	if err != nil {
 		return
 	}
@@ -70,10 +72,12 @@ func (r *registry) manager() {
 		case <-r.closeCh:
 			return
 		default:
-			err := conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-			if err != nil {
-				return
-			}
+			fmt.Println("here")
+			//err := conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			//if err != nil {
+			//	fmt.Println("Error setting read deadline:", err)
+			//	return
+			//}
 
 			_, rAddr, err := conn.ReadFromUDP(buffer)
 			if err != nil {
@@ -91,48 +95,50 @@ func (r *registry) manager() {
 				continue
 			}
 
-			if msg.body["token"] != r.token {
+			fmt.Printf("received message: %v\n", msg)
+
+			if msg.Body["token"] != r.token {
 				continue
 			}
 
 			var resp message
-			switch msg.header {
+			switch msg.Header {
 			case "discover":
 				resp = message{
-					header: "response",
-					body: map[string]string{
+					Header: "response",
+					Body: map[string]string{
 						"address": fmt.Sprintf("%s:%d", helpers.GetLocalIP(), r.port),
 						"token":   r.token,
 					},
 				}
 			case "register":
-				role := msg.body["role"]
-				id := msg.body["id"]
-				nodeAddr := msg.body["addr"]
+				role := msg.Body["role"]
+				id := msg.Body["id"]
+				nodeAddr := msg.Body["addr"]
 				r.table[role][id] = nodeAddr
 
 				resp = message{
-					header: "response",
-					body: map[string]string{
+					Header: "response",
+					Body: map[string]string{
 						"registered": "true",
 					},
 				}
 			case "lookup":
-				role := msg.body["role"]
-				id := msg.body["id"]
+				role := msg.Body["role"]
+				id := msg.Body["id"]
 
 				if nodeAddr, ok := r.table[role][id]; !ok {
 					resp = message{
-						header: "response",
-						body: map[string]string{
+						Header: "response",
+						Body: map[string]string{
 							"found": "false",
 							"addr":  "",
 						},
 					}
 				} else {
 					resp = message{
-						header: "response",
-						body: map[string]string{
+						Header: "response",
+						Body: map[string]string{
 							"found": "true",
 							"addr":  nodeAddr,
 						},
@@ -141,6 +147,8 @@ func (r *registry) manager() {
 			}
 
 			respBytes, err := json.Marshal(resp)
+
+			fmt.Printf("Sending message: %v\n", resp)
 
 			_, err = r.conn.WriteToUDP(respBytes, rAddr)
 			if err != nil {
