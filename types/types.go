@@ -13,3 +13,8 @@ type Response struct {
 	ReqNum   int    `json:"req_num"` //heartbeat count for lfd
 	Response string `json:"response"`
 }
+
+type LogEntry struct {
+	Timestamp int64          `json:"timestamp"`
+	State     map[string]int `json:"state"`
+}
