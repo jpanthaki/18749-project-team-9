@@ -1,59 +1,100 @@
 package registry
 
 import (
-	"encoding/json"
-	"fmt"
-	"net"
 	"testing"
 	"time"
 )
 
-func TestRegistry(t *testing.T) {
-	reg, _ := NewRegistry(18749, "team9")
+func TestRegisterAndLookup_Success(t *testing.T) {
+	reg, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error: %v", err)
+	}
+	if err := reg.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	defer reg.Stop()
 
+	role, id, addr := "server", "s1", "localhost:9000"
+
+	reg.Register(role, id, addr)
+
+	got, err := reg.Lookup(role, id)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != addr {
+		t.Fatalf("expected %q, got %q", addr, got)
+	}
+}
+
+func TestLookup_RoleNotFound(t *testing.T) {
+	reg, _ := NewRegistry()
+	reg.Start()
+	defer reg.Stop()
+
+	_, err := reg.Lookup("unknownRole", "id1")
+	if err == nil {
+		t.Fatalf("expected error for missing role, got nil")
+	}
+	want := "Role unknownRole not found"
+	if err.Error() != want {
+		t.Fatalf("expected %q, got %q", want, err.Error())
+	}
+}
+
+func TestLookup_IDNotFound(t *testing.T) {
+	reg, _ := NewRegistry()
+	reg.Start()
+	defer reg.Stop()
+
+	reg.Register("client", "c1", "127.0.0.1:7000")
+
+	_, err := reg.Lookup("client", "c2")
+	if err == nil {
+		t.Fatalf("expected error for missing id, got nil")
+	}
+	want := "ID c2 not found for role client."
+	if err.Error() != want {
+		t.Fatalf("expected %q, got %q", want, err.Error())
+	}
+}
+
+func TestRegister_OverwriteAllowed(t *testing.T) {
+	reg, _ := NewRegistry()
+	reg.Start()
+	defer reg.Stop()
+
+	role, id := "worker", "w1"
+	addr1 := "127.0.0.1:1111"
+	addr2 := "127.0.0.1:2222"
+
+	reg.Register(role, id, addr1)
+	reg.Register(role, id, addr2)
+
+	got, err := reg.Lookup(role, id)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != addr2 {
+		t.Fatalf("expected overwritten addr %q, got %q", addr2, got)
+	}
+}
+
+func TestStop_CleanExit(t *testing.T) {
+	reg, _ := NewRegistry()
 	reg.Start()
 
-	time.Sleep(1 * time.Second)
+	done := make(chan struct{})
+	go func() {
+		reg.Stop()
+		close(done)
+	}()
 
-	message := struct {
-		Header string            `json:"header"`
-		Body   map[string]string `json:"body"`
-	}{
-		Header: "discover",
-		Body: map[string]string{
-			"token": "team9",
-		},
+	select {
+	case <-done:
+		// ok
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Stop() did not complete in time")
 	}
-
-	addr, err := net.ResolveUDPAddr("udp4", "255.255.255.255:18749")
-	fmt.Println(addr)
-	if err != nil {
-		fmt.Printf("Error resolving UDP address: %v\n", err)
-		return
-	}
-
-	conn, err := net.DialUDP("udp4", nil, addr)
-	if err != nil {
-		fmt.Printf("Error dialing UDP: %v\n", err)
-		return
-	}
-	defer conn.Close()
-
-	bytes, err := json.Marshal(message)
-	if err != nil {
-		fmt.Printf("Error marshalling message: %v\n", err)
-		return
-	}
-
-	_, err = conn.Write(bytes)
-	if err != nil {
-		fmt.Printf("Error sending broadcast message: %v\n", err)
-	} else {
-		fmt.Println("Broadcasted:", message)
-	}
-
-	time.Sleep(5 * time.Second)
-
-	reg.Stop()
-
 }
