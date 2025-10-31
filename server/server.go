@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 )
 
 type server struct {
@@ -19,6 +20,7 @@ type server struct {
 	isLeader            bool
 	checkpointFreq      int
 	checkpointCount     int
+	checkpointCh        chan types.Checkpoint
 
 	state   map[string]int
 	isReady bool
@@ -32,6 +34,7 @@ type server struct {
 	closeCh chan struct{}
 
 	connections map[net.Conn]struct{} // Track active connections
+	peers       map[net.Conn]struct{} //Track other servers
 
 	lfdPort int
 	lfdConn net.Conn
@@ -59,6 +62,7 @@ func NewServer(id string, port int, protocol string, lfdPort int, replicationPro
 		}),
 		closeCh:     make(chan struct{}),
 		connections: make(map[net.Conn]struct{}), // Initialize client map
+		peers:       make(map[net.Conn]struct{}),
 
 		lfdPort: lfdPort,
 
@@ -95,14 +99,17 @@ func (s *server) Stop() error {
 	s.status = "stopped"
 	s.isReady = false
 	if s.listener != nil {
-		s.listener.Close()
+		err := s.listener.Close()
+		if err != nil {
+			return err
+		}
 	}
 	// Close all active connections
 	for conn := range s.connections {
-		conn.Close()
+		_ = conn.Close()
 	}
 	if s.lfdConn != nil {
-		s.lfdConn.Close()
+		_ = s.lfdConn.Close()
 	}
 	close(s.closeCh) // Signal manager goroutine to exit
 	return nil
@@ -120,9 +127,7 @@ func (s *server) connectToLFD() {
 	for {
 		conn, err := net.Dial(s.protocol, ":"+strconv.Itoa(s.lfdPort))
 		if err == nil {
-
 			s.lfdConn = conn
-
 			go s.handleConnection(conn)
 			return
 		}
@@ -131,7 +136,10 @@ func (s *server) connectToLFD() {
 
 func (s *server) listen(readyCh chan struct{}) {
 	close(readyCh)
-	defer s.listener.Close()
+	defer func(listener net.Listener) {
+		_ = listener.Close()
+	}(s.listener)
+
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
@@ -145,6 +153,8 @@ func (s *server) listen(readyCh chan struct{}) {
 }
 
 func (s *server) manager() {
+	ticker := time.NewTicker(time.Duration(s.checkpointFreq) * time.Millisecond)
+
 	for {
 		select {
 		case msg := <-s.msgCh:
@@ -196,12 +206,30 @@ func (s *server) manager() {
 			}
 		case <-s.closeCh:
 			return
+		case <-ticker.C:
+
 		}
 	}
 }
 
+func (s *server) handlePeerConnection(conn net.Conn) {
+	defer func(conn net.Conn) {
+		_ = conn.Close()
+	}(conn)
+	defer delete(s.peers, conn)
+
+	for {
+		if s.replicationProtocol == "active" || (s.replicationProtocol == "passive" && s.isLeader) {
+
+		}
+	}
+
+}
+
 func (s *server) handleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func(conn net.Conn) {
+		_ = conn.Close()
+	}(conn)
 	defer delete(s.connections, conn) // Remove the connection from the clients map when done
 
 	for {

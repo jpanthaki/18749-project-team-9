@@ -14,7 +14,7 @@ type Response struct {
 	Response string `json:"response"`
 }
 
-type LogEntry struct {
-	Timestamp int64          `json:"timestamp"`
-	State     map[string]int `json:"state"`
+type Checkpoint struct {
+	State           map[string]int `json:"state"`
+	CheckpointCount int            `json:"checkpoint_count"`
 }
