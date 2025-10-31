@@ -10,39 +10,7 @@ import (
 	"time"
 )
 
-type server struct {
-	id       string
-	port     int
-	protocol string
-	listener net.Listener
-
-	replicationProtocol string
-	isLeader            bool
-	checkpointFreq      int
-	checkpointCount     int
-	checkpointCh        chan types.Checkpoint
-
-	state   map[string]int
-	isReady bool
-	status  string
-	msgCh   chan struct {
-		id         string
-		message    types.Message
-		responseCh chan types.Response
-	}
-	readyCh chan chan bool
-	closeCh chan struct{}
-
-	connections map[net.Conn]struct{} // Track active connections
-	peers       map[net.Conn]struct{} //Track other servers
-
-	lfdPort int
-	lfdConn net.Conn
-
-	logger *log.Logger
-}
-
-func NewServer(id string, port int, protocol string, lfdPort int, replicationProtocol string, isLeader bool, checkpointFreq int) (Server, error) {
+func NewServer(id string, port int, protocol string, lfdPort int, replicationMode string, isLeader bool, checkpointFreq int, peers map[string]string) (Server, error) {
 	s := &server{
 		id:       id,
 		port:     port,
@@ -51,18 +19,21 @@ func NewServer(id string, port int, protocol string, lfdPort int, replicationPro
 		isReady:  false,
 		status:   "stopped",
 
-		replicationProtocol: replicationProtocol,
-		isLeader:            isLeader,
-		checkpointFreq:      checkpointFreq,
+		replicationMode: replicationMode,
+		isLeader:        isLeader,
+		checkpointFreq:  checkpointFreq,
+		checkpointCount: 0,
+		checkpointCh:    make(chan types.Checkpoint),
+		peers:           peers,
 
 		msgCh: make(chan struct {
 			id         string
 			message    types.Message
 			responseCh chan types.Response
 		}),
-		closeCh:     make(chan struct{}),
-		connections: make(map[net.Conn]struct{}), // Initialize client map
-		peers:       make(map[net.Conn]struct{}),
+		closeCh:         make(chan struct{}),
+		connections:     make(map[net.Conn]struct{}), // Initialize client map
+		peerConnections: make(map[string]net.Conn),
 
 		lfdPort: lfdPort,
 
@@ -123,6 +94,39 @@ func (s *server) Ready() bool {
 	return s.isReady
 }
 
+type server struct {
+	id       string
+	port     int
+	protocol string
+	listener net.Listener
+
+	replicationMode string
+	isLeader        bool
+	checkpointFreq  int
+	checkpointCount int
+	checkpointCh    chan types.Checkpoint
+	peers           map[string]string
+
+	state   map[string]int
+	isReady bool
+	status  string
+	msgCh   chan struct {
+		id         string
+		message    types.Message
+		responseCh chan types.Response
+	}
+	readyCh chan chan bool
+	closeCh chan struct{}
+
+	connections     map[net.Conn]struct{} // Track active connections
+	peerConnections map[string]net.Conn   //Track other servers
+
+	lfdPort int
+	lfdConn net.Conn
+
+	logger *log.Logger
+}
+
 func (s *server) connectToLFD() {
 	for {
 		conn, err := net.Dial(s.protocol, ":"+strconv.Itoa(s.lfdPort))
@@ -152,6 +156,22 @@ func (s *server) listen(readyCh chan struct{}) {
 	}
 }
 
+func (s *server) connectToPeers() {
+	for {
+		for id, addr := range s.peers {
+			if s.id[len(s.id)-1] < id[len(id)-1] {
+				if _, ok := s.peerConnections[id]; !ok {
+					conn, err := net.Dial(s.protocol, addr)
+					if err == nil {
+						s.peerConnections[id] = conn //TODO need to handle concurrency with this structure here...
+						go s.handleConnection(conn)
+					}
+				}
+			}
+		}
+	}
+}
+
 func (s *server) manager() {
 	ticker := time.NewTicker(time.Duration(s.checkpointFreq) * time.Millisecond)
 
@@ -162,7 +182,8 @@ func (s *server) manager() {
 			var logMsg string
 			switch msg.message.Type {
 			case "client":
-				if s.replicationProtocol == "active" || (s.replicationProtocol == "passive" && s.isLeader) {
+				//TODO let's write some helper functions for this to clear up the code complexity...
+				if s.replicationMode == "active" || (s.replicationMode == "passive" && s.isLeader) {
 					logMsg = fmt.Sprintf("Received <%s, %s, %d, %s>", msg.message.Id, s.id, msg.message.ReqNum, msg.message.Message)
 					s.logger.Log(logMsg, "MessageReceived")
 					switch msg.message.Message {
@@ -203,27 +224,14 @@ func (s *server) manager() {
 				logMsg = fmt.Sprintf("<%d> Sent heartbeat to %s", resp.ReqNum, resp.Id)
 				s.logger.Log(logMsg, "HeartbeatSent")
 				msg.responseCh <- resp
+				//TODO need to handle case "replica" messages here (these will either be initial connection requests or checkpoints.)
 			}
 		case <-s.closeCh:
 			return
 		case <-ticker.C:
-
+			//TODO need to handle sending of checkpoints if we're passive and the leader.
 		}
 	}
-}
-
-func (s *server) handlePeerConnection(conn net.Conn) {
-	defer func(conn net.Conn) {
-		_ = conn.Close()
-	}(conn)
-	defer delete(s.peers, conn)
-
-	for {
-		if s.replicationProtocol == "active" || (s.replicationProtocol == "passive" && s.isLeader) {
-
-		}
-	}
-
 }
 
 func (s *server) handleConnection(conn net.Conn) {
