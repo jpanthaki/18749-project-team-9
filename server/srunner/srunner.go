@@ -17,7 +17,7 @@ func main() {
 	protocol := flag.String("protocol", "tcp", "protocol of the server ")
 	flag.Parse()
 
-	fmt.Printf("Starting server at IP address %s with ID: %s, Port: %d, Protocol: %s\n", helpers.GetLocalIP(), *id, *port, *protocol)
+	fmt.Printf("Starting server at address %s:%d with ID: %s, Protocol: %s\n", helpers.GetLocalIP(), *port, *id, *protocol)
 
 	sv, err := server.NewServer(*id, *port, *protocol, *lfdPort)
 	if err != nil {
