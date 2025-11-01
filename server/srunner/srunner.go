@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+//TODO Need to add the new arguments and parsing of the replica ids and their addresses.
+
 func main() {
 	id := flag.String("id", "S1", "id of the server")
 	port := flag.Int("port", 8080, "port of the server")

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func NewServer(id string, port int, protocol string, lfdPort int, replicationMode string, isLeader bool, checkpointFreq int, peers map[string]string) (Server, error) {
+func NewServer(id string, port int, protocol string, lfdPort int) (Server, error) { //, replicationMode string, isLeader bool, checkpointFreq int, peers map[string]string
 	s := &server{
 		id:       id,
 		port:     port,
@@ -19,18 +19,14 @@ func NewServer(id string, port int, protocol string, lfdPort int, replicationMod
 		isReady:  false,
 		status:   "stopped",
 
-		replicationMode: replicationMode,
-		isLeader:        isLeader,
-		checkpointFreq:  checkpointFreq,
+		replicationMode: "active",
+		isLeader:        false,
+		checkpointFreq:  2000,
 		checkpointCount: 0,
 		checkpointCh:    make(chan types.Checkpoint),
-		peers:           peers,
+		peers:           make(map[string]string),
 
-		msgCh: make(chan struct {
-			id         string
-			message    types.Message
-			responseCh chan types.Response
-		}),
+		msgCh:           make(chan internalMessage),
 		closeCh:         make(chan struct{}),
 		connections:     make(map[net.Conn]struct{}), // Initialize client map
 		peerConnections: make(map[string]net.Conn),
@@ -110,11 +106,7 @@ type server struct {
 	state   map[string]int
 	isReady bool
 	status  string
-	msgCh   chan struct {
-		id         string
-		message    types.Message
-		responseCh chan types.Response
-	}
+	msgCh   chan internalMessage
 	readyCh chan chan bool
 	closeCh chan struct{}
 
@@ -125,6 +117,12 @@ type server struct {
 	lfdConn net.Conn
 
 	logger *log.Logger
+}
+
+type internalMessage struct {
+	id         string
+	message    types.Message
+	responseCh chan types.Response
 }
 
 func (s *server) connectToLFD() {
@@ -174,63 +172,62 @@ func (s *server) connectToPeers() {
 
 func (s *server) manager() {
 	ticker := time.NewTicker(time.Duration(s.checkpointFreq) * time.Millisecond)
-
 	for {
 		select {
 		case msg := <-s.msgCh:
 			var resp types.Response
-			var logMsg string
 			switch msg.message.Type {
 			case "client":
-				//TODO let's write some helper functions for this to clear up the code complexity...
 				if s.replicationMode == "active" || (s.replicationMode == "passive" && s.isLeader) {
-					logMsg = fmt.Sprintf("Received <%s, %s, %d, %s>", msg.message.Id, s.id, msg.message.ReqNum, msg.message.Message)
-					s.logger.Log(logMsg, "MessageReceived")
-					switch msg.message.Message {
-					case "Init":
-						logMsg = fmt.Sprintf("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-						s.logger.Log(logMsg, "StateBefore")
-						s.state[msg.id] = 0
-						logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-						s.logger.Log(logMsg, "StateAfter")
-						resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("Client: %s Initialized, State: %d", msg.id, s.state[msg.id])}
-					case "CountUp":
-						logMsg = fmt.Sprintf("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-						s.logger.Log(logMsg, "StateBefore")
-						s.state[msg.id]++
-						logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-						s.logger.Log(logMsg, "StateAfter")
-						resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Up, State: %d}", msg.id, s.state[msg.id])}
-					case "CountDown":
-						logMsg = fmt.Sprintf("State = %v before processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-						s.logger.Log(logMsg, "StateBefore")
-						s.state[msg.id]--
-						logMsg = fmt.Sprintf("State = %v after processing <%s, %s, %d, %s>", s.state, msg.id, s.id, msg.message.ReqNum, msg.message.Message)
-						s.logger.Log(logMsg, "StateAfter")
-						resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Down, State: %d}", msg.id, s.state[msg.id])}
-					case "Close":
-						resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
-					default:
-						resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
-					}
-					logMsg = fmt.Sprintf("Sending <%s, %s, %d, %s>", resp.Id, s.id, resp.ReqNum, resp.Response)
-					s.logger.Log(logMsg, "MessageSent")
+					s.logReceived(msg.message)
+					s.handleClientMessage(msg, &resp)
+					s.logSent(resp)
 					msg.responseCh <- resp
 				}
+
 			case "lfd":
-				logMsg = fmt.Sprintf("<%d> Received heartbeat from %s", msg.message.ReqNum, msg.message.Id)
-				s.logger.Log(logMsg, "HeartbeatReceived")
+				s.logHeartbeatReceived(msg.message)
 				resp = types.Response{Type: "lfd", Id: msg.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
-				logMsg = fmt.Sprintf("<%d> Sent heartbeat to %s", resp.ReqNum, resp.Id)
-				s.logger.Log(logMsg, "HeartbeatSent")
+				s.logHeartbeatSent(resp)
 				msg.responseCh <- resp
-				//TODO need to handle case "replica" messages here (these will either be initial connection requests or checkpoints.)
+			//TODO need to handle case "replica" messages here (these will either be initial connection requests or checkpoints.)
+
+			case "replica":
+
 			}
 		case <-s.closeCh:
 			return
 		case <-ticker.C:
 			//TODO need to handle sending of checkpoints if we're passive and the leader.
 		}
+	}
+}
+
+func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) {
+	switch msg.message.Message {
+	case "Init":
+		s.logBefore(msg.message)
+		s.state[msg.id] = 0
+		s.logAfter(msg.message)
+		*resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("Client: %s Initialized, State: %d", msg.id, s.state[msg.id])}
+
+	case "CountUp":
+		s.logBefore(msg.message)
+		s.state[msg.id]++
+		s.logAfter(msg.message)
+		*resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Up, State: %d}", msg.id, s.state[msg.id])}
+
+	case "CountDown":
+		s.logBefore(msg.message)
+		s.state[msg.id]--
+		s.logAfter(msg.message)
+		*resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("{Client: %s Counted Down, State: %d}", msg.id, s.state[msg.id])}
+
+	case "Close":
+		*resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: "Connection closed"}
+
+	default:
+		*resp = types.Response{Type: "client", Id: s.id, ReqNum: msg.message.ReqNum, Response: "Unknown request"}
 	}
 }
 
@@ -252,11 +249,7 @@ func (s *server) handleConnection(conn net.Conn) {
 			return
 		}
 
-		request := struct {
-			id         string
-			message    types.Message
-			responseCh chan types.Response
-		}{
+		request := internalMessage{
 			id:         msg.Id,
 			message:    msg,
 			responseCh: make(chan types.Response),
