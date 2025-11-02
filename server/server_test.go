@@ -12,7 +12,7 @@ import (
 )
 
 func TestServerLifecycle(t *testing.T) {
-	srv, err := NewServer("test", 0, "tcp", 0)
+	srv, err := NewServer("S1", 0, "tcp", 0)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestServerLifecycle(t *testing.T) {
 }
 
 func TestServerWithThreeClients(t *testing.T) {
-	srv, err := NewServer("test", 0, "tcp", 0)
+	srv, err := NewServer("S1", 0, "tcp", 0)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestServerWithThreeClients(t *testing.T) {
 					return
 				}
 
-				if resp.Id != "test" {
+				if resp.Id != "S1" {
 					doneCh <- fmt.Errorf("Client %s: expected id %s, got %s", clientID, cc.id, resp.Id)
 					return
 				}
@@ -182,7 +182,7 @@ func TestServerWithLFD(t *testing.T) {
 	defer ln.Close()
 	fmt.Println("LFD: Mock LFD listening on port 9090")
 
-	srv, err := NewServer("test", 0, "tcp", 9090)
+	srv, err := NewServer("S1", 0, "tcp", 9090)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestServerWithLFD(t *testing.T) {
 			t.Fatalf("Failed to unmarshal heartbeat response %d: %v", i, err)
 		}
 
-		if resp.Id != id {
+		if resp.Id != "S1" {
 			t.Errorf("Heartbeat %d: expected id %s, got %s", i, id, resp.Id)
 		}
 		if resp.ReqNum != i {
