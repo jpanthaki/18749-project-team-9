@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func NewServer(id string, port int, protocol string, lfdPort int) (Server, error) { //, replicationMode string, isLeader bool, checkpointFreq int, peers map[string]string
+func NewServer(id string, port int, protocol string, lfdPort int, replicationMode string, isLeader bool, checkpointFreq int, peers map[string]string) (Server, error) {
 	s := &server{
 		id:       id,
 		port:     port,
@@ -20,12 +20,12 @@ func NewServer(id string, port int, protocol string, lfdPort int) (Server, error
 		isReady:  false,
 		status:   "stopped",
 
-		replicationMode: "active",
-		isLeader:        false,
-		checkpointFreq:  2000,
+		replicationMode: replicationMode,
+		isLeader:        isLeader,
+		checkpointFreq:  checkpointFreq,
 		checkpointCount: 0,
 		checkpointCh:    make(chan types.Checkpoint),
-		peers:           make(map[string]string),
+		peers:           peers,
 
 		msgCh:           make(chan internalMessage),
 		closeCh:         make(chan struct{}),
@@ -79,6 +79,9 @@ func (s *server) Stop() error {
 	}
 	if s.lfdConn != nil {
 		_ = s.lfdConn.Close()
+	}
+	for _, conn := range s.peerConnections {
+		_ = conn.Close()
 	}
 	close(s.closeCh) // Signal manager goroutine to exit
 	return nil
@@ -159,28 +162,25 @@ func (s *server) listen(readyCh chan struct{}) {
 	}
 }
 
-func (s *server) connectToPeers() {
-	for {
-		select {
-		case <-s.closeCh:
-			return
-		default:
-			for id, addr := range s.peers {
-				startedLater := s.id[len(s.id)-1] > id[len(id)-1]
-				//only initiate the connection if server ID is larger than peers (i.e., instance was started later)
-				if startedLater {
-					if _, ok := s.peerConnections[id]; !ok {
-						conn, err := net.Dial(s.protocol, addr)
-						if err == nil {
-							s.peerMu.Lock()
-							s.peerConnections[id] = conn
-							s.peerMu.Unlock()
-							go s.handleConnection(conn)
-						}
-					}
-				}
-			}
+func (s *server) connectToReplicas() {
+	for id, addr := range s.peers {
+		if id == s.id {
+			continue
 		}
+		go s.dialReplica(id, addr)
+	}
+}
+
+func (s *server) dialReplica(peerId, addr string) {
+	for {
+		conn, err := net.Dial(s.protocol, addr)
+		if err != nil {
+			continue
+		}
+		s.peerMu.Lock()
+		s.peerConnections[peerId] = conn
+		s.peerMu.Unlock()
+		return
 	}
 }
 
@@ -209,9 +209,44 @@ func (s *server) manager() {
 			msg.responseCh <- resp
 		case <-ticker.C:
 			//TODO need to handle sending of checkpoints if we're passive and the leader.
-
+			s.sendCheckpoint()
 		}
 	}
+}
+
+func (s *server) sendCheckpoint() {
+	s.checkpointCount++
+	chk := types.Checkpoint{
+		State:         cloneState(s.state),
+		CheckpointNum: s.checkpointCount,
+	}
+
+	bytes, _ := json.Marshal(&chk)
+
+	msg := types.Message{
+		Type:    "Replica",
+		Id:      s.id,
+		ReqNum:  s.checkpointCount,
+		Message: "Checkpoint",
+		Payload: bytes,
+	}
+
+	s.peerMu.Lock()
+	for peerId, conn := range s.peerConnections {
+		if peerId == s.id {
+			continue
+		}
+
+		go func(peerId string, conn net.Conn) {
+			if err := json.NewEncoder(conn).Encode(msg); err != nil {
+				//TODO log checkpoint failure
+			} else {
+				//TODO log checkpoint sent
+			}
+		}(peerId, conn)
+
+	}
+	s.peerMu.Unlock()
 }
 
 func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) {
@@ -245,11 +280,6 @@ func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 func (s *server) handleReplicaMessage(msg internalMessage) {
 	if s.replicationMode == "passive" {
 		switch msg.message.Message {
-		case "Hello":
-			id := msg.message.Id
-			s.peerMu.Lock()
-			s.peerConnections[id] = msg.conn
-			s.peerMu.Unlock()
 		case "Checkpoint":
 			if !s.isLeader {
 				var chk types.Checkpoint
@@ -271,14 +301,6 @@ func (s *server) handleConnection(conn net.Conn) {
 	defer func(conn net.Conn) {
 		_ = conn.Close()
 		delete(s.connections, conn)
-		for id, peerConn := range s.peerConnections {
-			if peerConn == conn {
-				s.peerMu.Lock()
-				delete(s.peerConnections, id)
-				s.peerMu.Unlock()
-				return
-			}
-		}
 	}(conn)
 
 	for {
