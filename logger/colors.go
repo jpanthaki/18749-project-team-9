@@ -17,12 +17,15 @@ const (
 
 var componentColors = map[string]map[string]string{
 	"Server": {
-		"HeartbeatReceived": RGB(255, 120, 255),
-		"HeartbeatSent":     RGB(200, 60, 200),
-		"MessageReceived":   RGB(90, 210, 255),
-		"MessageSent":       RGB(40, 160, 220),
-		"StateBefore":       RGB(160, 255, 160),
-		"StateAfter":        RGB(60, 200, 60),
+		"HeartbeatReceived":  RGB(255, 120, 255),
+		"HeartbeatSent":      RGB(200, 60, 200),
+		"MessageReceived":    RGB(90, 210, 255),
+		"MessageSent":        RGB(40, 160, 220),
+		"StateBefore":        RGB(160, 255, 160),
+		"StateAfter":         RGB(60, 200, 60),
+		"CheckpointSent":     RGB(255, 210, 80),
+		"CheckpointReceived": RGB(255, 255, 160),
+		"CheckpointFailed":   RGB(255, 100, 60),
 	},
 	"LFD": {
 		"GFDHeartbeatReceived":    RGB(255, 120, 255),

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -251,5 +252,177 @@ func TestServerWithLFD(t *testing.T) {
 	err = srv.Stop()
 	if err != nil {
 		t.Fatalf("Failed to stop server: %v", err)
+	}
+}
+
+func newTestCluster(t *testing.T) (Server, Server, Server) {
+	peers := map[string]string{
+		"S1": "127.0.0.1:10001",
+		"S2": "127.0.0.1:10002",
+		"S3": "127.0.0.1:10003",
+	}
+
+	s1, _ := NewServer("S1", 10001, "tcp", 5001, "passive", true, 2000, peers)
+	s2, _ := NewServer("S2", 10002, "tcp", 5002, "passive", false, 2000, peers)
+	s3, _ := NewServer("S3", 10003, "tcp", 5003, "passive", false, 2000, peers)
+
+	go s1.Start()
+	go s2.Start()
+	go s3.Start()
+
+	time.Sleep(1 * time.Second)
+	return s1, s2, s3
+}
+
+func teardownCluster(s1, s2, s3 Server) {
+	_ = s1.Stop()
+	_ = s2.Stop()
+	_ = s3.Stop()
+}
+
+func sendClientReq(t *testing.T, addr string, msg types.Message) *types.Response {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("client failed to connect to %s: %v", addr, err)
+	}
+	defer conn.Close()
+
+	data, _ := json.Marshal(msg)
+	_, err = conn.Write(data)
+	if err != nil {
+		t.Fatalf("client write failed: %v", err)
+	}
+
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatalf("client read failed: %v", err)
+	}
+
+	var resp types.Response
+	if err := json.Unmarshal(buf[:n], &resp); err != nil {
+		t.Fatalf("response unmarshal failed: %v", err)
+	}
+	return &resp
+}
+
+func TestCheckpointPropagation(t *testing.T) {
+	s1, s2, s3 := newTestCluster(t)
+	defer teardownCluster(s1, s2, s3)
+
+	s1Impl := s1.(*server)
+	s2Impl := s2.(*server)
+	s3Impl := s3.(*server)
+
+	msg := types.Message{Type: "client", Id: "C1", ReqNum: 1, Message: "Init"}
+	resp := sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Initialized") {
+		t.Fatalf("leader did not respond correctly, got: %v", resp.Response)
+	}
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 2, Message: "CountUp"}
+	_ = sendClientReq(t, "127.0.0.1:10001", msg)
+
+	time.Sleep(5 * time.Second) // allow checkpoints to propagate
+
+	if !reflect.DeepEqual(s1Impl.state, s2Impl.state) {
+		t.Fatalf("checkpoint mismatch: S1 %v vs S2 %v", s1Impl.state, s2Impl.state)
+	}
+	if !reflect.DeepEqual(s1Impl.state, s3Impl.state) {
+		t.Fatalf("checkpoint mismatch: S1 %v vs S3 %v", s1Impl.state, s3Impl.state)
+	}
+}
+
+func TestClientInteraction(t *testing.T) {
+	s1, s2, s3 := newTestCluster(t)
+	defer teardownCluster(s1, s2, s3)
+
+	msg := types.Message{Type: "client", Id: "C1", ReqNum: 1, Message: "Init"}
+
+	// leader should respond
+	resp := sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Initialized") {
+		t.Fatalf("leader did not respond, got: %v", resp.Response)
+	}
+
+	// backups should not respond
+	for _, addr := range []string{"127.0.0.1:10002", "127.0.0.1:10003"} {
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatalf("client connect to %s failed: %v", addr, err)
+		}
+		data, _ := json.Marshal(msg)
+		_, _ = conn.Write(data)
+
+		// short read timeout
+		conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		buf := make([]byte, 512)
+		n, err := conn.Read(buf)
+		conn.Close()
+		if err == nil && n > 0 {
+			t.Fatalf("backup %s responded unexpectedly: %s", addr, string(buf[:n]))
+		}
+	}
+}
+
+func TestReplicaFailure(t *testing.T) {
+	s1, s2, s3 := newTestCluster(t)
+	defer teardownCluster(s1, s2, s3)
+
+	s1Impl := s1.(*server)
+
+	s3Impl := s3.(*server)
+
+	// stop a backup
+	_ = s2.Stop()
+	time.Sleep(500 * time.Millisecond)
+
+	// client still talks to leader
+	msg := types.Message{Type: "client", Id: "C1", ReqNum: 1, Message: "Init"}
+	resp := sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Initialized") {
+		t.Fatalf("leader failed to handle request after backup stopped, got: %v", resp.Response)
+	}
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 2, Message: "CountUp"}
+	_ = sendClientReq(t, "127.0.0.1:10001", msg)
+
+	time.Sleep(2 * time.Second)
+
+	if !reflect.DeepEqual(s1Impl.state, s3Impl.state) {
+		t.Fatalf("leader and surviving backup inconsistent: S1 %v vs S3 %v", s1Impl.state, s3Impl.state)
+	}
+}
+
+func Test2ReplicaFailure(t *testing.T) {
+	s1, s2, s3 := newTestCluster(t)
+	defer teardownCluster(s1, s2, s3)
+
+	s1Impl := s1.(*server)
+
+	// stop a backup
+	_ = s2.Stop()
+	time.Sleep(500 * time.Millisecond)
+
+	//stop second backup
+	_ = s3.Stop()
+	time.Sleep(500 * time.Millisecond)
+
+	// client still talks to leader
+	msg := types.Message{Type: "client", Id: "C1", ReqNum: 1, Message: "Init"}
+	resp := sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Initialized") {
+		t.Fatalf("leader failed to handle request after backup stopped, got: %v", resp.Response)
+	}
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 2, Message: "CountUp"}
+	resp = sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp after both backups stopped: %v", resp.Response)
+	}
+
+	// --- Confirm state actually changed on leader ---
+	if s1Impl.state["C1"] != 1 {
+		t.Fatalf("leader state incorrect after CountUp, expected 1 got %d", s1Impl.state["C1"])
 	}
 }

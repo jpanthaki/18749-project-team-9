@@ -59,6 +59,8 @@ func (s *server) Start() error {
 	<-ready
 	s.isReady = true
 
+	go s.connectToReplicas()
+
 	return nil
 }
 
@@ -204,18 +206,21 @@ func (s *server) manager() {
 					s.logReceived(msg.message)
 					s.handleClientMessage(msg, &resp)
 					s.logSent(resp)
+					msg.responseCh <- resp
 				}
 			case "lfd":
 				s.logHeartbeatReceived(msg.message)
 				s.handleLFDMessage(msg, &resp)
 				s.logHeartbeatSent(resp)
+				msg.responseCh <- resp
 			case "replica":
 				s.handleReplicaMessage(msg)
+				msg.responseCh <- resp
 			}
-			msg.responseCh <- resp
 		case <-ticker.C:
-			//TODO need to handle sending of checkpoints if we're passive and the leader.
-			s.sendCheckpoint()
+			if s.replicationMode == "passive" && s.isLeader {
+				s.sendCheckpoint()
+			}
 		}
 	}
 }
@@ -230,7 +235,7 @@ func (s *server) sendCheckpoint() {
 	bytes, _ := json.Marshal(&chk)
 
 	msg := types.Message{
-		Type:    "Replica",
+		Type:    "replica",
 		Id:      s.id,
 		ReqNum:  s.checkpointCount,
 		Message: "Checkpoint",
@@ -244,10 +249,12 @@ func (s *server) sendCheckpoint() {
 		}
 
 		go func(peerId string, conn net.Conn) {
-			if err := json.NewEncoder(conn).Encode(msg); err != nil {
+			if err := json.NewEncoder(conn).Encode(msg); err == nil {
 				//TODO log checkpoint failure
+				s.logCheckpointSent(peerId, msg, chk)
 			} else {
 				//TODO log checkpoint sent
+				s.logger.Log(fmt.Sprintf("Error sending checkpoint %v", err), "CheckpointFailed")
 			}
 		}(peerId, conn)
 
@@ -290,6 +297,7 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 			if !s.isLeader {
 				var chk types.Checkpoint
 				_ = json.Unmarshal(msg.message.Payload, &chk)
+				s.logCheckpointReceived(msg.message, chk)
 				if chk.CheckpointNum > s.checkpointCount {
 					//update the state
 					s.checkpointCount = chk.CheckpointNum
