@@ -32,6 +32,7 @@ func NewServer(id string, port int, protocol string, lfdPort int, replicationMod
 		connections:     make(map[net.Conn]struct{}), // Initialize client map
 		peerConnections: make(map[string]net.Conn),
 		peerMu:          sync.Mutex{},
+		connMu:          sync.Mutex{},
 
 		lfdPort: lfdPort,
 
@@ -74,6 +75,8 @@ func (s *server) Stop() error {
 		}
 	}
 	// Close all active connections
+	s.connMu.Lock()
+	s.peerMu.Lock()
 	for conn := range s.connections {
 		_ = conn.Close()
 	}
@@ -84,6 +87,8 @@ func (s *server) Stop() error {
 		_ = conn.Close()
 	}
 	close(s.closeCh) // Signal manager goroutine to exit
+	s.peerMu.Unlock()
+	s.connMu.Unlock()
 	return nil
 }
 
@@ -118,6 +123,7 @@ type server struct {
 	connections     map[net.Conn]struct{} // Track active connections
 	peerConnections map[string]net.Conn   //Track other servers
 	peerMu          sync.Mutex
+	connMu          sync.Mutex
 
 	lfdPort int
 	lfdConn net.Conn
@@ -300,7 +306,9 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 func (s *server) handleConnection(conn net.Conn) {
 	defer func(conn net.Conn) {
 		_ = conn.Close()
+		s.connMu.Lock()
 		delete(s.connections, conn)
+		s.connMu.Unlock()
 	}(conn)
 
 	for {

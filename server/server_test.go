@@ -12,7 +12,11 @@ import (
 )
 
 func TestServerLifecycle(t *testing.T) {
-	srv, err := NewServer("S1", 0, "tcp", 0)
+	peers := map[string]string{
+		"S2": "123.123.123.123:1234",
+		"S3": "123.123.123.123:1234",
+	}
+	srv, err := NewServer("S1", 0, "tcp", 0, "active", false, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -44,7 +48,11 @@ func TestServerLifecycle(t *testing.T) {
 }
 
 func TestServerWithThreeClients(t *testing.T) {
-	srv, err := NewServer("S1", 0, "tcp", 0)
+	peers := map[string]string{
+		"S2": "123.123.123.123:1234",
+		"S3": "123.123.123.123:1234",
+	}
+	srv, err := NewServer("S1", 0, "tcp", 0, "active", false, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -182,7 +190,11 @@ func TestServerWithLFD(t *testing.T) {
 	defer ln.Close()
 	fmt.Println("LFD: Mock LFD listening on port 9090")
 
-	srv, err := NewServer("S1", 0, "tcp", 9090)
+	peers := map[string]string{
+		"S2": "123.123.123.123:1234",
+		"S3": "123.123.123.123:1234",
+	}
+	srv, err := NewServer("S1", 0, "tcp", 9090, "active", false, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
