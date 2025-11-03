@@ -159,6 +159,7 @@ func (c *Client) SendAll(command string) (*types.Response, error) {
 			// 	go c.reader(st)
 			// }
 			go c.dial(st)
+			continue
 		}
 		if !st.alive || st.conn == nil {
 			continue
