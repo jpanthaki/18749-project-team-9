@@ -16,13 +16,13 @@ start_lfd() {
     -port $lfdport -gfdaddr $gfdaddr
 }
 
-# args <id>
+# args <id> <replicationMode>{active, passive}
 start_server() {
     local serverid="S$1"
     local lfdport=$((9000 + $1))
     local serverport=$((8080 + $1))
     go run server/srunner/srunner.go -id $serverid -port $serverport \
-    -lfdPort $lfdport
+    -lfdPort $lfdport -replicationMode $2
 }
 
 # args <id> <s1> <s2> <s3>
@@ -41,18 +41,43 @@ start_gfd() {
 }
 
 if [ $1 = "lfd" ]; then
+    if [ $# -ne 3 ]; then
+        echo "incorect number of args: $# for LFD"
+        echo "lfd args: <id> <gfdaddr>"
+        exit -1
+    fi
     echo "starting lfd $2.."
     start_lfd $2 $3 
+    exit 0
 
 elif [ $1 = "server" ]; then
+    if [ $# -ne 3 ]; then
+        echo "incorect number of args: $# for server"
+        echo "server args: <id> <replicationMode>{active, passive}"
+        exit -1
+    fi
     echo "starting server $2.."
-    start_server $2
+    start_server $2 $3
+    exit 0
 
 elif [ $1 = "client" ]; then
+    if [ $# -ne 5 ]; then
+        echo "incorect number of args: $# for client"
+        echo "client args: <id> <s1> <s2> <s3>"
+        exit -1
+    fi
     echo "starting client $2.."
     start_client $2 $3 $4 $5
+    exit 0
 
 elif [ $1 = "gfd" ]; then
+    if [ $# -ne 1 ]; then
+        echo "incorect number of args: $# for gfd"
+        echo "gfd args: none"
+        exit -1
+    fi
     echo "starting gfd.."
     start_gfd
+    exit 0
 fi
+echo "invalid type {lfd, server, client, gfd}"
