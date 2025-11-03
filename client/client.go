@@ -78,30 +78,33 @@ func New(opts Options) (*Client, error) {
 
 	// Bring up connections (best-effort)
 	for _, st := range c.conns {
-		_ = c.dial(st) // mark alive if success
+		// _ = c.dial(st) // mark alive if success
+		go c.dial(st)
 	}
 
 	// Start reader goroutines for each alive conn
-	for _, st := range c.conns {
-		if st.alive {
-			go c.reader(st)
-		}
-	}
+	// for _, st := range c.conns {
+	// 	if st.alive {
+	// 		go c.reader(st)
+	// 	}
+	// }
 
 	return c, nil
 }
 
 func (c *Client) dial(st *connState) error {
-	conn, err := net.Dial("tcp", st.addr)
-	if err != nil {
-		st.alive = false
-		return err
+	for {
+		conn, err := net.Dial("tcp", st.addr)
+		if err == nil {
+			st.conn = conn
+			st.dec = json.NewDecoder(bufio.NewReader(conn))
+			st.alive = true
+			go c.reader(st)
+			return nil
+		}
 	}
-	st.conn = conn
-	st.dec = json.NewDecoder(bufio.NewReader(conn))
-	st.alive = true
-	return nil
 }
+
 
 func (c *Client) Close() error {
 	c.mu.Lock()
@@ -150,11 +153,12 @@ func (c *Client) SendAll(command string) (*types.Response, error) {
 	cur := c.reqNum
 	for _, st := range c.conns {
 		if !st.alive {
-			// best-effort reconnect
-			_ = c.dial(st)
-			if st.alive {
-				go c.reader(st)
-			}
+			// // best-effort reconnect
+			// _ = c.dial(st)
+			// if st.alive {
+			// 	go c.reader(st)
+			// }
+			go c.dial(st)
 		}
 		if !st.alive || st.conn == nil {
 			continue
