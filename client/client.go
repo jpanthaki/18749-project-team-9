@@ -52,6 +52,47 @@ type taggedResp struct {
 
 func ts() string { return time.Now().Format("2006-01-02 15:04:05.000") }
 
+// func New(opts Options) (*Client, error) {
+// 	if opts.Timeout == 0 {
+// 		opts.Timeout = 3 * time.Second
+// 	}
+// 	c := &Client{
+// 		id:      opts.ID,
+// 		reqNum:  opts.StartingReq,
+// 		timeout: opts.Timeout,
+// 		conns:   make(map[string]*connState),
+// 		respCh:  make(chan taggedResp, 16),
+// 		logger:  log.New("Client"),
+// 	}
+
+// 	// Prepare connection map
+// 	add := func(rid, addr string) {
+// 		if strings.TrimSpace(addr) == "" {
+// 			return
+// 		}
+// 		c.conns[rid] = &connState{rid: rid, addr: addr}
+// 	}
+// 	add("S1", opts.S1Addr)
+// 	add("S2", opts.S2Addr)
+// 	add("S3", opts.S3Addr)
+
+// 	// ready1, ready2, ready3 = make(chan struct{}), make(chan struct{}), make(chan struct{})
+
+// 	// Bring up connections (best-effort)
+// 	for _, st := range c.conns {
+// 		// _ = c.dial(st) // mark alive if success
+// 		go c.dial(st)
+// 	}
+
+// 	// Start reader goroutines for each alive conn
+// 	// for _, st := range c.conns {
+// 	// 	if st.alive {
+// 	// 		go c.reader(st)
+// 	// 	}
+// 	// }
+
+//		return c, nil
+//	}
 func New(opts Options) (*Client, error) {
 	if opts.Timeout == 0 {
 		opts.Timeout = 3 * time.Second
@@ -76,19 +117,33 @@ func New(opts Options) (*Client, error) {
 	add("S2", opts.S2Addr)
 	add("S3", opts.S3Addr)
 
-	// Bring up connections (best-effort)
-	for _, st := range c.conns {
-		// _ = c.dial(st) // mark alive if success
-		go c.dial(st)
+	// --- Try connecting to all servers ---
+	fmt.Println("[Client] Connecting to all servers...")
+
+	for {
+		allConnected := true
+		for _, st := range c.conns {
+			if !st.alive {
+				conn, err := net.Dial("tcp", st.addr)
+				if err != nil {
+					allConnected = false
+					fmt.Printf("[%s] connect failed: %v\n", st.rid, err)
+					continue
+				}
+				st.conn = conn
+				st.dec = json.NewDecoder(bufio.NewReader(conn))
+				st.alive = true
+				go c.reader(st)
+				fmt.Printf("[%s] connected\n", st.rid)
+			}
+		}
+		if allConnected {
+			break // all 3 servers connected
+		}
+		time.Sleep(1 * time.Second)
 	}
 
-	// Start reader goroutines for each alive conn
-	// for _, st := range c.conns {
-	// 	if st.alive {
-	// 		go c.reader(st)
-	// 	}
-	// }
-
+	fmt.Println("[Client] All servers connected. Ready to send requests.")
 	return c, nil
 }
 
@@ -104,7 +159,6 @@ func (c *Client) dial(st *connState) error {
 		}
 	}
 }
-
 
 func (c *Client) Close() error {
 	c.mu.Lock()
