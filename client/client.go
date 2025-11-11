@@ -133,11 +133,14 @@ func New(opts Options) (*Client, error) {
 				st.conn = conn
 				st.dec = json.NewDecoder(bufio.NewReader(conn))
 				st.alive = true
-				go c.reader(st)
+				// go c.reader(st)
 				fmt.Printf("[%s] connected\n", st.rid)
 			}
 		}
 		if allConnected {
+			for _, st := range c.conns {
+				go c.reader(st)
+			}
 			break // all 3 servers connected
 		}
 		time.Sleep(1 * time.Second)
