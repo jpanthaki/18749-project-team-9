@@ -181,14 +181,13 @@ func (s *server) connectToReplicas() {
 
 func (s *server) dialReplica(peerId, addr string) {
 	for {
-		conn, err := net.Dial(s.protocol, addr)
-		if err != nil {
-			continue
+		conn, err := net.DialTimeout(s.protocol, addr, 500*time.Millisecond)
+		if err == nil {
+			s.peerMu.Lock()
+			s.peerConnections[peerId] = conn
+			s.peerMu.Unlock()
+			return
 		}
-		s.peerMu.Lock()
-		s.peerConnections[peerId] = conn
-		s.peerMu.Unlock()
-		return
 	}
 }
 

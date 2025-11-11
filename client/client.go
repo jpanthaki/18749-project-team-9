@@ -124,7 +124,7 @@ func New(opts Options) (*Client, error) {
 		allConnected := true
 		for _, st := range c.conns {
 			if !st.alive {
-				conn, err := net.DialTimeout("tcp", st.addr, 5*time.Second)
+				conn, err := net.DialTimeout("tcp", st.addr, 500*time.Millisecond)
 				if err != nil {
 					allConnected = false
 					fmt.Printf("[%s] connect failed: %v\n", st.rid, err)
