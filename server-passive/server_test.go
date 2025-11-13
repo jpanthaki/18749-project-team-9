@@ -255,6 +255,58 @@ func TestServerWithLFD(t *testing.T) {
 	}
 }
 
+func TestSingleLeaderPromotion(t *testing.T) {
+	peers := map[string]string{
+		"S2": "123.123.123.123:1234",
+		"S3": "123.123.123.123:1234",
+	}
+	srv, err := NewServer("S1", 0, "tcp", 0, false, 2000, peers)
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	_ = srv.Start()
+
+	// Get the actual port assigned
+	serverImpl := srv.(*server)
+	for serverImpl.listener == nil {
+		time.Sleep(10 * time.Millisecond)
+	}
+	port := serverImpl.listener.Addr().(*net.TCPAddr).Port
+	fmt.Println(port)
+
+	// Wait for the server to be ready
+	for !srv.Ready() {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	msg := types.Message{
+		Type:    "rm",
+		Id:      "RM",
+		ReqNum:  0,
+		Message: "Promote",
+	}
+	var conn net.Conn
+	if conn, err = net.Dial("tcp", fmt.Sprintf(":%d", port)); err != nil {
+		t.Fatalf("Dial to server failed...")
+	}
+
+	bytes, _ := json.Marshal(&msg)
+
+	conn.Write(bytes)
+
+	time.Sleep(10 * time.Millisecond)
+
+	if !serverImpl.isLeader {
+		t.Fatalf("Leader promotion failed...")
+	}
+
+	err = srv.Stop()
+	if err != nil {
+		t.Fatalf("Failed to stop server: %v", err)
+	}
+}
+
 func newTestCluster(t *testing.T) (Server, Server, Server) {
 	peers := map[string]string{
 		"S1": "127.0.0.1:10001",
@@ -425,4 +477,80 @@ func Test2ReplicaFailure(t *testing.T) {
 	if s1Impl.state["C1"] != 1 {
 		t.Fatalf("leader state incorrect after CountUp, expected 1 got %d", s1Impl.state["C1"])
 	}
+}
+
+func TestPrimaryFailureWithLeaderPromotion(t *testing.T) {
+	s1, s2, s3 := newTestCluster(t)
+	defer teardownCluster(s1, s2, s3)
+
+	s1Impl := s1.(*server)
+	s2Impl := s2.(*server)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// client still talks to leader
+	msg := types.Message{Type: "client", Id: "C1", ReqNum: 1, Message: "Init"}
+	resp := sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Initialized") {
+		t.Fatalf("leader failed to handle request, got: %v", resp.Response)
+	}
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 2, Message: "CountUp"}
+	resp = sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	// --- Confirm state actually changed on leader ---
+	if s1Impl.state["C1"] != 1 {
+		t.Fatalf("leader state incorrect after CountUp, expected 1 got %d", s1Impl.state["C1"])
+	}
+
+	//allow some time for checkpointing
+	time.Sleep(6 * time.Second)
+
+	//now kill the leader...
+
+	_ = s1.Stop()
+	time.Sleep(500 * time.Millisecond)
+
+	//and promote S2...
+	rmMsg := types.Message{
+		Type:    "rm",
+		Id:      "RM",
+		ReqNum:  0,
+		Message: "Promote",
+	}
+
+	var conn net.Conn
+	var err error
+	if conn, err = net.Dial("tcp", "127.0.0.1:10002"); err != nil {
+		t.Fatalf("Dial to server failed...")
+	}
+
+	bytes, _ := json.Marshal(&rmMsg)
+
+	conn.Write(bytes)
+
+	time.Sleep(10 * time.Millisecond)
+
+	//now check if S2 is the leader:
+	if !s2Impl.isLeader {
+		t.Fatalf("S2 was not elected leader")
+	}
+
+	//wait for checkpoints...
+	time.Sleep(6 * time.Second)
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 3, Message: "CountUp"}
+	resp = sendClientReq(t, "127.0.0.1:10002", msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	// --- Confirm state actually changed on leader ---
+	if s2Impl.state["C1"] != 2 {
+		t.Fatalf("leader state incorrect after CountUp, expected 2 got %d", s2Impl.state["C1"])
+	}
+
 }
