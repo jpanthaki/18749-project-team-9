@@ -19,6 +19,7 @@ type Response struct {
 
 type Checkpoint struct {
 	State         map[string]int `json:"state"`
+	LastReqNum    int            `json:"last_req_num"`
 	CheckpointNum int            `json:"checkpoint_num"`
 }
 
