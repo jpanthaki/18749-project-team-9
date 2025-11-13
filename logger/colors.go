@@ -26,6 +26,7 @@ var componentColors = map[string]map[string]string{
 		"CheckpointSent":     RGB(255, 210, 80),
 		"CheckpointReceived": RGB(255, 255, 160),
 		"CheckpointFailed":   RGB(255, 100, 60),
+		"LeaderPromoted":     RGB(255, 255, 0),
 	},
 	"LFD": {
 		"GFDHeartbeatReceived":    RGB(255, 120, 255),

@@ -1,4 +1,4 @@
-package server
+package passive
 
 type Server interface {
 	// start the server.

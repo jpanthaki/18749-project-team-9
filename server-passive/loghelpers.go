@@ -1,4 +1,4 @@
-package server
+package passive
 
 import (
 	"18749-team9/types"
@@ -43,4 +43,9 @@ func (s *server) logCheckpointSent(peerId string, msg types.Message, chk types.C
 func (s *server) logCheckpointReceived(msg types.Message, chk types.Checkpoint) {
 	logMsg := fmt.Sprintf("Checkpoint <%d> received from %s, state: %v", msg.ReqNum, msg.Id, chk.State)
 	s.logger.Log(logMsg, "CheckpointReceived")
+}
+
+func (s *server) logLeaderPromotion() {
+	logMsg := fmt.Sprintf("Replica %s promoted to leader...", s.id)
+	s.logger.Log(logMsg, "LeaderPromoted")
 }

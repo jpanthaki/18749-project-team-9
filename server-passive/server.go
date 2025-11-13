@@ -1,4 +1,4 @@
-package server
+package passive
 
 import (
 	log "18749-team9/logger"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func NewServer(id string, port int, protocol string, lfdPort int, replicationMode string, isLeader bool, checkpointFreq int, peers map[string]string) (Server, error) {
+func NewServer(id string, port int, protocol string, lfdPort int, isLeader bool, checkpointFreq int, peers map[string]string) (Server, error) {
 	s := &server{
 		id:       id,
 		port:     port,
@@ -20,7 +20,6 @@ func NewServer(id string, port int, protocol string, lfdPort int, replicationMod
 		isReady:  false,
 		status:   "stopped",
 
-		replicationMode: replicationMode,
 		isLeader:        isLeader,
 		checkpointFreq:  checkpointFreq,
 		checkpointCount: 0,
@@ -108,7 +107,6 @@ type server struct {
 	protocol string
 	listener net.Listener
 
-	replicationMode string
 	isLeader        bool
 	checkpointFreq  int
 	checkpointCount int
@@ -201,7 +199,7 @@ func (s *server) manager() {
 			var resp types.Response
 			switch msg.message.Type {
 			case "client":
-				if s.replicationMode == "active" || (s.replicationMode == "passive" && s.isLeader) {
+				if s.isLeader {
 					s.logReceived(msg.message)
 					s.handleClientMessage(msg, &resp)
 					s.logSent(resp)
@@ -215,9 +213,12 @@ func (s *server) manager() {
 			case "replica":
 				s.handleReplicaMessage(msg)
 				msg.responseCh <- resp
+			case "rm":
+				s.handleRMMessage(msg)
+				msg.responseCh <- resp
 			}
 		case <-ticker.C:
-			if s.replicationMode == "passive" && s.isLeader {
+			if s.isLeader {
 				s.sendCheckpoint()
 			}
 		}
@@ -249,10 +250,8 @@ func (s *server) sendCheckpoint() {
 
 		go func(peerId string, conn net.Conn) {
 			if err := json.NewEncoder(conn).Encode(msg); err == nil {
-				//TODO log checkpoint failure
 				s.logCheckpointSent(peerId, msg, chk)
 			} else {
-				//TODO log checkpoint sent
 				s.logger.Log(fmt.Sprintf("Error sending checkpoint %v", err), "CheckpointFailed")
 			}
 		}(peerId, conn)
@@ -290,24 +289,26 @@ func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 }
 
 func (s *server) handleReplicaMessage(msg internalMessage) {
-	if s.replicationMode == "passive" {
-		switch msg.message.Message {
-		case "Checkpoint":
-			if !s.isLeader {
-				var chk types.Checkpoint
-				_ = json.Unmarshal(msg.message.Payload, &chk)
-				s.logCheckpointReceived(msg.message, chk)
-				if chk.CheckpointNum > s.checkpointCount {
-					//update the state
-					s.checkpointCount = chk.CheckpointNum
-					s.state = cloneState(chk.State)
-				}
+	switch msg.message.Message {
+	case "Checkpoint":
+		if !s.isLeader {
+			var chk types.Checkpoint
+			_ = json.Unmarshal(msg.message.Payload, &chk)
+			s.logCheckpointReceived(msg.message, chk)
+			if chk.CheckpointNum > s.checkpointCount {
+				//update the state
+				s.checkpointCount = chk.CheckpointNum
+				s.state = cloneState(chk.State)
 			}
 		}
-	} else if s.replicationMode == "active" {
-		//TODO for Milestone 4, nothing for now.
 	}
+}
 
+func (s *server) handleRMMessage(msg internalMessage) {
+	switch msg.message.Message {
+	case "Promote":
+		s.isLeader = true
+	}
 }
 
 func (s *server) handleConnection(conn net.Conn) {
