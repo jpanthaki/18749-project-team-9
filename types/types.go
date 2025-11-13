@@ -3,7 +3,7 @@ package types
 import "encoding/json"
 
 type Message struct {
-	Type    string          `json:"type"` // "client", "lfd", or replica
+	Type    string          `json:"type"` // "client", "lfd", "gfd", "replica", "rm"
 	Id      string          `json:"id"`
 	ReqNum  int             `json:"req_num"`
 	Message string          `json:"message"`           // e.g., "Init", "CountUp", "CountDown", "Close"
@@ -21,3 +21,7 @@ type Checkpoint struct {
 	State         map[string]int `json:"state"`
 	CheckpointNum int            `json:"checkpoint_num"`
 }
+
+//RM messages
+//leader promotion (if passive)
+//eventually: launch replica
