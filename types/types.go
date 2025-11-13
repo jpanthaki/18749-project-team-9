@@ -23,5 +23,7 @@ type Checkpoint struct {
 }
 
 //RM messages
-//leader promotion (if passive)
-//eventually: launch replica
+//leader promotion (if passive) `Promote`
+//eventually: launch replica `Launch`
+//
+//When we propagate RM messages, they should always have type="rm"
