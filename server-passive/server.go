@@ -308,6 +308,7 @@ func (s *server) handleRMMessage(msg internalMessage) {
 	switch msg.message.Message {
 	case "Promote":
 		s.isLeader = true
+		s.logLeaderPromotion()
 	}
 }
 
