@@ -358,6 +358,45 @@ func sendClientReq(t *testing.T, addr string, msg types.Message) *types.Response
 	return &resp
 }
 
+func sendAll(t *testing.T, msg types.Message) types.Response {
+	addrs := map[string]string{
+		"s1Addr": "127.0.0.1:10001",
+		"s2Addr": "127.0.0.1:10002",
+		"s3Addr": "127.0.0.1:10003",
+	}
+
+	respCh := make(chan types.Response)
+
+	for _, addr := range addrs {
+		go func(addr string) {
+			conn, _ := net.Dial("tcp", addr)
+			fmt.Printf("Connected to %s", addr)
+
+			bytes, _ := json.Marshal(&msg)
+
+			conn.Write(bytes)
+
+			buf := make([]byte, 1024)
+			n, _ := conn.Read(buf)
+
+			var resp types.Response
+			json.Unmarshal(buf[:n], &resp)
+
+			fmt.Println(resp)
+
+			respCh <- resp
+			// fmt.Printf("Response from  %s", addr)
+		}(addr)
+	}
+
+	select {
+	case resp := <-respCh:
+		fmt.Println(resp)
+		return resp
+	}
+
+}
+
 func TestCheckpointPropagation(t *testing.T) {
 	s1, s2, s3 := newTestCluster(t)
 	defer teardownCluster(s1, s2, s3)
@@ -552,5 +591,112 @@ func TestPrimaryFailureWithLeaderPromotion(t *testing.T) {
 	if s2Impl.state["C1"] != 2 {
 		t.Fatalf("leader state incorrect after CountUp, expected 2 got %d", s2Impl.state["C1"])
 	}
+}
 
+func TestReplicaFailAndRecover(t *testing.T) {
+	s1, s2, s3 := newTestCluster(t)
+	defer teardownCluster(s1, s2, s3)
+
+	s1Impl := s1.(*server)
+	s2Impl := s2.(*server)
+	s3Impl := s3.(*server)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// client still talks to leader
+	msg := types.Message{Type: "client", Id: "C1", ReqNum: 1, Message: "Init"}
+	resp := sendAll(t, msg)
+	if !strings.Contains(resp.Response, "Initialized") {
+		t.Fatalf("leader failed to handle request, got: %v", resp.Response)
+	}
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 2, Message: "CountUp"}
+	resp = sendAll(t, msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	// --- Confirm state actually changed on leader ---
+	if s1Impl.state["C1"] != 1 {
+		t.Fatalf("leader state incorrect after CountUp, expected 1 got %d", s1Impl.state["C1"])
+	}
+
+	//allow some time for checkpointing
+	time.Sleep(6 * time.Second)
+
+	//confirm state changes on replicas
+
+	if s2Impl.state["C1"] != 1 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 1 got %d", s2Impl.state["C1"])
+	}
+
+	if s3Impl.state["C1"] != 1 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 1 got %d", s3Impl.state["C1"])
+	}
+
+	//now kill a replica
+	fmt.Println("Killing S2...")
+	_ = s2.Stop
+
+	time.Sleep(4000 * time.Millisecond)
+
+	fmt.Println("S2 dead...")
+
+	//try and send another message
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 3, Message: "CountUp"}
+	resp = sendAll(t, msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	//confirm leader state...
+	if s1Impl.state["C1"] != 2 {
+		t.Fatalf("leader state incorrect after CountUp, expected 2 got %d", s1Impl.state["C1"])
+	}
+
+	//sleep for checkpoint
+
+	time.Sleep(6 * time.Second)
+
+	if s3Impl.state["C1"] != 2 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 2 got %d", s3Impl.state["C1"])
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	//now bring s2 back to life...
+
+	go s2.Start()
+
+	//sleep for startup and checkpoints
+	time.Sleep(6 * time.Second)
+
+	if s2Impl.state["C1"] != 2 {
+		t.Fatalf("replica state incorrect after recovery, expected 2 got %d", s3Impl.state["C1"])
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	//send another message for good measure...
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 4, Message: "CountUp"}
+	resp = sendAll(t, msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	if s1Impl.state["C1"] != 3 {
+		t.Fatalf("leader state incorrect, expected 3 got %d", s1Impl.state["C1"])
+	}
+
+	time.Sleep(6 * time.Second)
+
+	if s2Impl.state["C1"] != 3 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 3 got %d", s2Impl.state["C1"])
+	}
+
+	if s3Impl.state["C1"] != 3 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 3 got %d", s3Impl.state["C1"])
+	}
 }
