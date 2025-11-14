@@ -284,8 +284,5 @@ func TestLfdStatus(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Status should still be "stopped" until server connects
-	// (or we can adjust this based on actual implementation)
-
 	t.Logf("LFD status test passed")
 }

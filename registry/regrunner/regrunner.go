@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	reg, _ := registry.NewRegistry(18749, "team9")
+	reg, _ := registry.NewRegistry()
 
 	reg.Start()
 
