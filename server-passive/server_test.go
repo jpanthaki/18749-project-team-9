@@ -17,14 +17,14 @@ func TestServerLifecycle(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 0, true, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 0, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
 	// Start server in a goroutine since Start blocks
 	go func() {
-		err := srv.Start()
+		err := srv.Start(true)
 		if err != nil {
 			// Ignore error if stopping
 		}
@@ -53,15 +53,12 @@ func TestServerWithThreeClients(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 0, true, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 0, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	//go func() {
-	//	_ = srv.Start()
-	//}()
-	_ = srv.Start()
+	_ = srv.Start(true)
 
 	// Get the actual port assigned
 	serverImpl := srv.(*server)
@@ -195,13 +192,13 @@ func TestServerWithLFD(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 9090, true, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 9090, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
 	go func() {
-		err := srv.Start()
+		err := srv.Start(true)
 		if err != nil {
 			// Ignore error if stopping
 		}
@@ -260,12 +257,12 @@ func TestSingleLeaderPromotion(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 0, false, 2000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 0, 2000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	_ = srv.Start()
+	_ = srv.Start(false)
 
 	// Get the actual port assigned
 	serverImpl := srv.(*server)
@@ -314,13 +311,13 @@ func newTestCluster(t *testing.T) (Server, Server, Server) {
 		"S3": "127.0.0.1:10003",
 	}
 
-	s1, _ := NewServer("S1", 10001, "tcp", 5001, true, 2000, peers)
-	s2, _ := NewServer("S2", 10002, "tcp", 5002, false, 2000, peers)
-	s3, _ := NewServer("S3", 10003, "tcp", 5003, false, 2000, peers)
+	s1, _ := NewServer("S1", 10001, "tcp", 5001, 2000, peers)
+	s2, _ := NewServer("S2", 10002, "tcp", 5002, 2000, peers)
+	s3, _ := NewServer("S3", 10003, "tcp", 5003, 2000, peers)
 
-	go s1.Start()
-	go s2.Start()
-	go s3.Start()
+	go s1.Start(true)
+	go s2.Start(false)
+	go s3.Start(false)
 
 	time.Sleep(1 * time.Second)
 	return s1, s2, s3
@@ -369,15 +366,23 @@ func sendAll(t *testing.T, msg types.Message) types.Response {
 
 	for _, addr := range addrs {
 		go func(addr string) {
-			conn, _ := net.Dial("tcp", addr)
-			fmt.Printf("Connected to %s", addr)
+			conn, err := net.Dial("tcp", addr)
+			if err != nil {
+				return
+			}
 
-			bytes, _ := json.Marshal(&msg)
+			bytes, err := json.Marshal(&msg)
+			if err != nil {
+				return
+			}
 
 			conn.Write(bytes)
 
 			buf := make([]byte, 1024)
-			n, _ := conn.Read(buf)
+			n, err := conn.Read(buf)
+			if err != nil {
+				return
+			}
 
 			var resp types.Response
 			json.Unmarshal(buf[:n], &resp)
@@ -385,13 +390,11 @@ func sendAll(t *testing.T, msg types.Message) types.Response {
 			fmt.Println(resp)
 
 			respCh <- resp
-			// fmt.Printf("Response from  %s", addr)
 		}(addr)
 	}
 
 	select {
 	case resp := <-respCh:
-		fmt.Println(resp)
 		return resp
 	}
 
@@ -667,7 +670,7 @@ func TestReplicaFailAndRecover(t *testing.T) {
 
 	//now bring s2 back to life...
 
-	go s2.Start()
+	go s2.Start(false)
 
 	//sleep for startup and checkpoints
 	time.Sleep(6 * time.Second)

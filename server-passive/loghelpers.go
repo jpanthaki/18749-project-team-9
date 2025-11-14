@@ -36,12 +36,12 @@ func (s *server) logHeartbeatSent(resp types.Response) {
 }
 
 func (s *server) logCheckpointSent(peerId string, msg types.Message, chk types.Checkpoint) {
-	logMsg := fmt.Sprintf("Checkpoint <%d> sent to %s, state: %v", msg.ReqNum, peerId, chk.State)
+	logMsg := fmt.Sprintf("<%s> Checkpoint <%d> sent to %s, state: %v", s.id, msg.ReqNum, peerId, chk.State)
 	s.logger.Log(logMsg, "CheckpointSent")
 }
 
 func (s *server) logCheckpointReceived(msg types.Message, chk types.Checkpoint) {
-	logMsg := fmt.Sprintf("Checkpoint <%d> received from %s, state: %v", msg.ReqNum, msg.Id, chk.State)
+	logMsg := fmt.Sprintf("<%s> Checkpoint <%d> received from %s, state: %v", s.id, msg.ReqNum, msg.Id, chk.State)
 	s.logger.Log(logMsg, "CheckpointReceived")
 }
 

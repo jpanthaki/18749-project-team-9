@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func NewServer(id string, port int, protocol string, lfdPort int, isLeader bool, checkpointFreq int, peers map[string]string) (Server, error) {
+func NewServer(id string, port int, protocol string, lfdPort int, checkpointFreq int, peers map[string]string) (Server, error) {
 	s := &server{
 		id:       id,
 		port:     port,
@@ -20,14 +20,12 @@ func NewServer(id string, port int, protocol string, lfdPort int, isLeader bool,
 		isReady:  false,
 		status:   "stopped",
 
-		isLeader:        isLeader,
 		checkpointFreq:  checkpointFreq,
 		checkpointCount: 0,
 		checkpointCh:    make(chan types.Checkpoint),
 		peers:           peers,
 
 		msgCh:           make(chan internalMessage),
-		closeCh:         make(chan struct{}),
 		connections:     make(map[net.Conn]struct{}), // Initialize client map
 		peerConnections: make(map[string]net.Conn),
 		peerMu:          sync.Mutex{},
@@ -40,7 +38,9 @@ func NewServer(id string, port int, protocol string, lfdPort int, isLeader bool,
 	return s, nil
 }
 
-func (s *server) Start() error {
+func (s *server) Start(isLeader bool) error {
+	s.isLeader = isLeader
+
 	l, err := net.Listen(s.protocol, ":"+strconv.Itoa(s.port))
 	if err != nil {
 		return err
@@ -58,7 +58,11 @@ func (s *server) Start() error {
 	<-ready
 	s.isReady = true
 
-	go s.connectToReplicas()
+	if s.isLeader {
+		go s.connectToReplicas()
+	}
+
+	s.closeCh = make(chan struct{})
 
 	return nil
 }
@@ -179,11 +183,17 @@ func (s *server) connectToReplicas() {
 
 func (s *server) dialReplica(peerId, addr string) {
 	for {
+		select {
+		case <-s.closeCh:
+			return
+		default:
+		}
 		conn, err := net.DialTimeout(s.protocol, addr, 500*time.Millisecond)
 		if err == nil {
 			s.peerMu.Lock()
 			s.peerConnections[peerId] = conn
 			s.peerMu.Unlock()
+			//fmt.Println("Connection made to: ", peerId)
 			return
 		}
 	}
@@ -253,11 +263,26 @@ func (s *server) sendCheckpoint() {
 				s.logCheckpointSent(peerId, msg, chk)
 			} else {
 				s.logger.Log(fmt.Sprintf("Error sending checkpoint %v", err), "CheckpointFailed")
+				s.handlePeerFailure(peerId, conn)
 			}
 		}(peerId, conn)
 
 	}
 	s.peerMu.Unlock()
+}
+
+func (s *server) handlePeerFailure(peerId string, conn net.Conn) {
+	s.peerMu.Lock()
+	delete(s.peerConnections, peerId)
+	s.peerMu.Unlock()
+
+	s.connMu.Lock()
+	delete(s.connections, conn)
+	s.connMu.Unlock()
+
+	_ = conn.Close()
+
+	go s.dialReplica(peerId, s.peers[peerId])
 }
 
 func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) {
@@ -309,6 +334,7 @@ func (s *server) handleRMMessage(msg internalMessage) {
 	case "Promote":
 		s.isLeader = true
 		s.logLeaderPromotion()
+		go s.connectToReplicas()
 	}
 }
 
@@ -320,17 +346,24 @@ func (s *server) handleConnection(conn net.Conn) {
 		s.connMu.Unlock()
 	}(conn)
 
+	//fmt.Println("New connection in:", s.id)
+
 	for {
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)
+		//fmt.Println("After Read in:", s.id)
 		if err != nil {
+			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 		var msg types.Message
 		err = json.Unmarshal(buf[:n], &msg)
 		if err != nil {
+			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
+
+		//fmt.Println(s.id, msg)
 
 		request := internalMessage{
 			id:         msg.Id,
@@ -344,11 +377,14 @@ func (s *server) handleConnection(conn net.Conn) {
 
 		respBytes, err := json.Marshal(response)
 		if err != nil {
+			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 
 		_, err = conn.Write(respBytes)
+		//fmt.Println("After Write in:", s.id)
 		if err != nil {
+			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 	}
