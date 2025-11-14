@@ -1,4 +1,4 @@
-package server
+package passive
 
 import (
 	log "18749-team9/logger"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func NewServer(id string, port int, protocol string, lfdPort int, replicationMode string, isLeader bool, checkpointFreq int, peers map[string]string) (Server, error) {
+func NewServer(id string, port int, protocol string, lfdPort int, checkpointFreq int, peers map[string]string) (Server, error) {
 	s := &server{
 		id:       id,
 		port:     port,
@@ -20,15 +20,12 @@ func NewServer(id string, port int, protocol string, lfdPort int, replicationMod
 		isReady:  false,
 		status:   "stopped",
 
-		replicationMode: replicationMode,
-		isLeader:        isLeader,
 		checkpointFreq:  checkpointFreq,
 		checkpointCount: 0,
 		checkpointCh:    make(chan types.Checkpoint),
 		peers:           peers,
 
 		msgCh:           make(chan internalMessage),
-		closeCh:         make(chan struct{}),
 		connections:     make(map[net.Conn]struct{}), // Initialize client map
 		peerConnections: make(map[string]net.Conn),
 		peerMu:          sync.Mutex{},
@@ -41,7 +38,9 @@ func NewServer(id string, port int, protocol string, lfdPort int, replicationMod
 	return s, nil
 }
 
-func (s *server) Start() error {
+func (s *server) Start(isLeader bool) error {
+	s.isLeader = isLeader
+
 	l, err := net.Listen(s.protocol, ":"+strconv.Itoa(s.port))
 	if err != nil {
 		return err
@@ -59,7 +58,11 @@ func (s *server) Start() error {
 	<-ready
 	s.isReady = true
 
-	go s.connectToReplicas()
+	if s.isLeader {
+		go s.connectToReplicas()
+	}
+
+	s.closeCh = make(chan struct{})
 
 	return nil
 }
@@ -108,7 +111,6 @@ type server struct {
 	protocol string
 	listener net.Listener
 
-	replicationMode string
 	isLeader        bool
 	checkpointFreq  int
 	checkpointCount int
@@ -181,11 +183,17 @@ func (s *server) connectToReplicas() {
 
 func (s *server) dialReplica(peerId, addr string) {
 	for {
+		select {
+		case <-s.closeCh:
+			return
+		default:
+		}
 		conn, err := net.DialTimeout(s.protocol, addr, 500*time.Millisecond)
 		if err == nil {
 			s.peerMu.Lock()
 			s.peerConnections[peerId] = conn
 			s.peerMu.Unlock()
+			//fmt.Println("Connection made to: ", peerId)
 			return
 		}
 	}
@@ -201,7 +209,7 @@ func (s *server) manager() {
 			var resp types.Response
 			switch msg.message.Type {
 			case "client":
-				if s.replicationMode == "active" || (s.replicationMode == "passive" && s.isLeader) {
+				if s.isLeader {
 					s.logReceived(msg.message)
 					s.handleClientMessage(msg, &resp)
 					s.logSent(resp)
@@ -215,9 +223,12 @@ func (s *server) manager() {
 			case "replica":
 				s.handleReplicaMessage(msg)
 				msg.responseCh <- resp
+			case "rm":
+				s.handleRMMessage(msg)
+				msg.responseCh <- resp
 			}
 		case <-ticker.C:
-			if s.replicationMode == "passive" && s.isLeader {
+			if s.isLeader {
 				s.sendCheckpoint()
 			}
 		}
@@ -249,16 +260,29 @@ func (s *server) sendCheckpoint() {
 
 		go func(peerId string, conn net.Conn) {
 			if err := json.NewEncoder(conn).Encode(msg); err == nil {
-				//TODO log checkpoint failure
 				s.logCheckpointSent(peerId, msg, chk)
 			} else {
-				//TODO log checkpoint sent
 				s.logger.Log(fmt.Sprintf("Error sending checkpoint %v", err), "CheckpointFailed")
+				s.handlePeerFailure(peerId, conn)
 			}
 		}(peerId, conn)
 
 	}
 	s.peerMu.Unlock()
+}
+
+func (s *server) handlePeerFailure(peerId string, conn net.Conn) {
+	s.peerMu.Lock()
+	delete(s.peerConnections, peerId)
+	s.peerMu.Unlock()
+
+	s.connMu.Lock()
+	delete(s.connections, conn)
+	s.connMu.Unlock()
+
+	_ = conn.Close()
+
+	go s.dialReplica(peerId, s.peers[peerId])
 }
 
 func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) {
@@ -290,24 +314,28 @@ func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 }
 
 func (s *server) handleReplicaMessage(msg internalMessage) {
-	if s.replicationMode == "passive" {
-		switch msg.message.Message {
-		case "Checkpoint":
-			if !s.isLeader {
-				var chk types.Checkpoint
-				_ = json.Unmarshal(msg.message.Payload, &chk)
-				s.logCheckpointReceived(msg.message, chk)
-				if chk.CheckpointNum > s.checkpointCount {
-					//update the state
-					s.checkpointCount = chk.CheckpointNum
-					s.state = cloneState(chk.State)
-				}
+	switch msg.message.Message {
+	case "Checkpoint":
+		if !s.isLeader {
+			var chk types.Checkpoint
+			_ = json.Unmarshal(msg.message.Payload, &chk)
+			s.logCheckpointReceived(msg.message, chk)
+			if chk.CheckpointNum > s.checkpointCount {
+				//update the state
+				s.checkpointCount = chk.CheckpointNum
+				s.state = cloneState(chk.State)
 			}
 		}
-	} else if s.replicationMode == "active" {
-		//TODO for Milestone 4, nothing for now.
 	}
+}
 
+func (s *server) handleRMMessage(msg internalMessage) {
+	switch msg.message.Message {
+	case "Promote":
+		s.isLeader = true
+		s.logLeaderPromotion()
+		go s.connectToReplicas()
+	}
 }
 
 func (s *server) handleConnection(conn net.Conn) {
@@ -318,17 +346,24 @@ func (s *server) handleConnection(conn net.Conn) {
 		s.connMu.Unlock()
 	}(conn)
 
+	//fmt.Println("New connection in:", s.id)
+
 	for {
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)
+		//fmt.Println("After Read in:", s.id)
 		if err != nil {
+			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 		var msg types.Message
 		err = json.Unmarshal(buf[:n], &msg)
 		if err != nil {
+			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
+
+		//fmt.Println(s.id, msg)
 
 		request := internalMessage{
 			id:         msg.Id,
@@ -342,11 +377,14 @@ func (s *server) handleConnection(conn net.Conn) {
 
 		respBytes, err := json.Marshal(response)
 		if err != nil {
+			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 
 		_, err = conn.Write(respBytes)
+		//fmt.Println("After Write in:", s.id)
 		if err != nil {
+			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 	}

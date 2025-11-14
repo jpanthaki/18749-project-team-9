@@ -1,4 +1,4 @@
-package server
+package passive
 
 import (
 	"18749-team9/types"
@@ -17,14 +17,14 @@ func TestServerLifecycle(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 0, "active", false, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 0, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
 	// Start server in a goroutine since Start blocks
 	go func() {
-		err := srv.Start()
+		err := srv.Start(true)
 		if err != nil {
 			// Ignore error if stopping
 		}
@@ -53,15 +53,12 @@ func TestServerWithThreeClients(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 0, "active", false, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 0, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	//go func() {
-	//	_ = srv.Start()
-	//}()
-	_ = srv.Start()
+	_ = srv.Start(true)
 
 	// Get the actual port assigned
 	serverImpl := srv.(*server)
@@ -195,13 +192,13 @@ func TestServerWithLFD(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 9090, "active", false, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 9090, 10000, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
 	go func() {
-		err := srv.Start()
+		err := srv.Start(true)
 		if err != nil {
 			// Ignore error if stopping
 		}
@@ -255,6 +252,58 @@ func TestServerWithLFD(t *testing.T) {
 	}
 }
 
+func TestSingleLeaderPromotion(t *testing.T) {
+	peers := map[string]string{
+		"S2": "123.123.123.123:1234",
+		"S3": "123.123.123.123:1234",
+	}
+	srv, err := NewServer("S1", 0, "tcp", 0, 2000, peers)
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	_ = srv.Start(false)
+
+	// Get the actual port assigned
+	serverImpl := srv.(*server)
+	for serverImpl.listener == nil {
+		time.Sleep(10 * time.Millisecond)
+	}
+	port := serverImpl.listener.Addr().(*net.TCPAddr).Port
+	fmt.Println(port)
+
+	// Wait for the server to be ready
+	for !srv.Ready() {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	msg := types.Message{
+		Type:    "rm",
+		Id:      "RM",
+		ReqNum:  0,
+		Message: "Promote",
+	}
+	var conn net.Conn
+	if conn, err = net.Dial("tcp", fmt.Sprintf(":%d", port)); err != nil {
+		t.Fatalf("Dial to server failed...")
+	}
+
+	bytes, _ := json.Marshal(&msg)
+
+	conn.Write(bytes)
+
+	time.Sleep(10 * time.Millisecond)
+
+	if !serverImpl.isLeader {
+		t.Fatalf("Leader promotion failed...")
+	}
+
+	err = srv.Stop()
+	if err != nil {
+		t.Fatalf("Failed to stop server: %v", err)
+	}
+}
+
 func newTestCluster(t *testing.T) (Server, Server, Server) {
 	peers := map[string]string{
 		"S1": "127.0.0.1:10001",
@@ -262,13 +311,13 @@ func newTestCluster(t *testing.T) (Server, Server, Server) {
 		"S3": "127.0.0.1:10003",
 	}
 
-	s1, _ := NewServer("S1", 10001, "tcp", 5001, "passive", true, 2000, peers)
-	s2, _ := NewServer("S2", 10002, "tcp", 5002, "passive", false, 2000, peers)
-	s3, _ := NewServer("S3", 10003, "tcp", 5003, "passive", false, 2000, peers)
+	s1, _ := NewServer("S1", 10001, "tcp", 5001, 2000, peers)
+	s2, _ := NewServer("S2", 10002, "tcp", 5002, 2000, peers)
+	s3, _ := NewServer("S3", 10003, "tcp", 5003, 2000, peers)
 
-	go s1.Start()
-	go s2.Start()
-	go s3.Start()
+	go s1.Start(true)
+	go s2.Start(false)
+	go s3.Start(false)
 
 	time.Sleep(1 * time.Second)
 	return s1, s2, s3
@@ -304,6 +353,51 @@ func sendClientReq(t *testing.T, addr string, msg types.Message) *types.Response
 		t.Fatalf("response unmarshal failed: %v", err)
 	}
 	return &resp
+}
+
+func sendAll(t *testing.T, msg types.Message) types.Response {
+	addrs := map[string]string{
+		"s1Addr": "127.0.0.1:10001",
+		"s2Addr": "127.0.0.1:10002",
+		"s3Addr": "127.0.0.1:10003",
+	}
+
+	respCh := make(chan types.Response)
+
+	for _, addr := range addrs {
+		go func(addr string) {
+			conn, err := net.Dial("tcp", addr)
+			if err != nil {
+				return
+			}
+
+			bytes, err := json.Marshal(&msg)
+			if err != nil {
+				return
+			}
+
+			conn.Write(bytes)
+
+			buf := make([]byte, 1024)
+			n, err := conn.Read(buf)
+			if err != nil {
+				return
+			}
+
+			var resp types.Response
+			json.Unmarshal(buf[:n], &resp)
+
+			fmt.Println(resp)
+
+			respCh <- resp
+		}(addr)
+	}
+
+	select {
+	case resp := <-respCh:
+		return resp
+	}
+
 }
 
 func TestCheckpointPropagation(t *testing.T) {
@@ -424,5 +518,188 @@ func Test2ReplicaFailure(t *testing.T) {
 	// --- Confirm state actually changed on leader ---
 	if s1Impl.state["C1"] != 1 {
 		t.Fatalf("leader state incorrect after CountUp, expected 1 got %d", s1Impl.state["C1"])
+	}
+}
+
+func TestPrimaryFailureWithLeaderPromotion(t *testing.T) {
+	s1, s2, s3 := newTestCluster(t)
+	defer teardownCluster(s1, s2, s3)
+
+	s1Impl := s1.(*server)
+	s2Impl := s2.(*server)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// client still talks to leader
+	msg := types.Message{Type: "client", Id: "C1", ReqNum: 1, Message: "Init"}
+	resp := sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Initialized") {
+		t.Fatalf("leader failed to handle request, got: %v", resp.Response)
+	}
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 2, Message: "CountUp"}
+	resp = sendClientReq(t, "127.0.0.1:10001", msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	// --- Confirm state actually changed on leader ---
+	if s1Impl.state["C1"] != 1 {
+		t.Fatalf("leader state incorrect after CountUp, expected 1 got %d", s1Impl.state["C1"])
+	}
+
+	//allow some time for checkpointing
+	time.Sleep(6 * time.Second)
+
+	//now kill the leader...
+
+	_ = s1.Stop()
+	time.Sleep(500 * time.Millisecond)
+
+	//and promote S2...
+	rmMsg := types.Message{
+		Type:    "rm",
+		Id:      "RM",
+		ReqNum:  0,
+		Message: "Promote",
+	}
+
+	var conn net.Conn
+	var err error
+	if conn, err = net.Dial("tcp", "127.0.0.1:10002"); err != nil {
+		t.Fatalf("Dial to server failed...")
+	}
+
+	bytes, _ := json.Marshal(&rmMsg)
+
+	conn.Write(bytes)
+
+	time.Sleep(10 * time.Millisecond)
+
+	//now check if S2 is the leader:
+	if !s2Impl.isLeader {
+		t.Fatalf("S2 was not elected leader")
+	}
+
+	//wait for checkpoints...
+	time.Sleep(6 * time.Second)
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 3, Message: "CountUp"}
+	resp = sendClientReq(t, "127.0.0.1:10002", msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	// --- Confirm state actually changed on leader ---
+	if s2Impl.state["C1"] != 2 {
+		t.Fatalf("leader state incorrect after CountUp, expected 2 got %d", s2Impl.state["C1"])
+	}
+}
+
+func TestReplicaFailAndRecover(t *testing.T) {
+	s1, s2, s3 := newTestCluster(t)
+	defer teardownCluster(s1, s2, s3)
+
+	s1Impl := s1.(*server)
+	s2Impl := s2.(*server)
+	s3Impl := s3.(*server)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// client still talks to leader
+	msg := types.Message{Type: "client", Id: "C1", ReqNum: 1, Message: "Init"}
+	resp := sendAll(t, msg)
+	if !strings.Contains(resp.Response, "Initialized") {
+		t.Fatalf("leader failed to handle request, got: %v", resp.Response)
+	}
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 2, Message: "CountUp"}
+	resp = sendAll(t, msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	// --- Confirm state actually changed on leader ---
+	if s1Impl.state["C1"] != 1 {
+		t.Fatalf("leader state incorrect after CountUp, expected 1 got %d", s1Impl.state["C1"])
+	}
+
+	//allow some time for checkpointing
+	time.Sleep(6 * time.Second)
+
+	//confirm state changes on replicas
+
+	if s2Impl.state["C1"] != 1 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 1 got %d", s2Impl.state["C1"])
+	}
+
+	if s3Impl.state["C1"] != 1 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 1 got %d", s3Impl.state["C1"])
+	}
+
+	//now kill a replica
+	fmt.Println("Killing S2...")
+	_ = s2.Stop
+
+	time.Sleep(4000 * time.Millisecond)
+
+	fmt.Println("S2 dead...")
+
+	//try and send another message
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 3, Message: "CountUp"}
+	resp = sendAll(t, msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	//confirm leader state...
+	if s1Impl.state["C1"] != 2 {
+		t.Fatalf("leader state incorrect after CountUp, expected 2 got %d", s1Impl.state["C1"])
+	}
+
+	//sleep for checkpoint
+
+	time.Sleep(6 * time.Second)
+
+	if s3Impl.state["C1"] != 2 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 2 got %d", s3Impl.state["C1"])
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	//now bring s2 back to life...
+
+	go s2.Start(false)
+
+	//sleep for startup and checkpoints
+	time.Sleep(6 * time.Second)
+
+	if s2Impl.state["C1"] != 2 {
+		t.Fatalf("replica state incorrect after recovery, expected 2 got %d", s3Impl.state["C1"])
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	//send another message for good measure...
+
+	msg = types.Message{Type: "client", Id: "C1", ReqNum: 4, Message: "CountUp"}
+	resp = sendAll(t, msg)
+	if !strings.Contains(resp.Response, "Counted Up") {
+		t.Fatalf("leader failed CountUp: %v", resp.Response)
+	}
+
+	if s1Impl.state["C1"] != 3 {
+		t.Fatalf("leader state incorrect, expected 3 got %d", s1Impl.state["C1"])
+	}
+
+	time.Sleep(6 * time.Second)
+
+	if s2Impl.state["C1"] != 3 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 3 got %d", s2Impl.state["C1"])
+	}
+
+	if s3Impl.state["C1"] != 3 {
+		t.Fatalf("replica state incorrect after checkpoint, expected 3 got %d", s3Impl.state["C1"])
 	}
 }

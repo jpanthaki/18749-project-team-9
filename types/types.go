@@ -23,6 +23,11 @@ type Checkpoint struct {
 	CheckpointNum int            `json:"checkpoint_num"`
 }
 
+type PassiveCheckpoint struct {
+	State         map[string]int `json:"state"`
+	CheckpointNum int            `json:"checkpoint_num"`
+}
+
 //RM messages
 //leader promotion (if passive) `Promote`
 //eventually: launch replica `Launch`
