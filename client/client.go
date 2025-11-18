@@ -1,313 +1,204 @@
-package client
+package main
 
 import (
 	log "18749-team9/logger"
 	"18749-team9/types"
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
-	"strings"
+	"os"
 	"sync"
 	"time"
 )
 
-type Options struct {
-	S1Addr      string
-	S2Addr      string
-	S3Addr      string
-	ID          string
-	StartingReq int
-	Timeout     time.Duration
-	Auto        bool   // run infinite loop automatically
-	Op          string // command to send each iteration: Init | CountUp | CountDown | Close
-	Think       time.Duration
-}
+type client struct {
+	id          string
+	serverAddrs map[string]string
+	connMutex   sync.Mutex
+	conns       map[string]net.Conn
+	primary     string
 
-type connState struct {
-	rid   string // S1|S2|S3
-	addr  string
-	conn  net.Conn
-	dec   *json.Decoder
-	alive bool
-}
-
-type Client struct {
-	id      string
-	reqNum  int
-	timeout time.Duration
-
-	mu     sync.Mutex
-	conns  map[string]*connState // rid -> state
-	respCh chan taggedResp
+	reqNum int
 
 	logger *log.Logger
 }
 
-type taggedResp struct {
-	rid string
-	r   types.Response
-	err error
+func (c *client) connectToServer(id, addr string) {
+	for {
+		conn := c.retryDial(addr)
+
+		c.connMutex.Lock()
+		c.conns[id] = conn
+		c.connMutex.Unlock()
+
+		fmt.Printf("connected to %s\n", id)
+		return
+	}
 }
 
-func ts() string { return time.Now().Format("2006-01-02 15:04:05.000") }
-
-// func New(opts Options) (*Client, error) {
-// 	if opts.Timeout == 0 {
-// 		opts.Timeout = 3 * time.Second
-// 	}
-// 	c := &Client{
-// 		id:      opts.ID,
-// 		reqNum:  opts.StartingReq,
-// 		timeout: opts.Timeout,
-// 		conns:   make(map[string]*connState),
-// 		respCh:  make(chan taggedResp, 16),
-// 		logger:  log.New("Client"),
-// 	}
-
-// 	// Prepare connection map
-// 	add := func(rid, addr string) {
-// 		if strings.TrimSpace(addr) == "" {
-// 			return
-// 		}
-// 		c.conns[rid] = &connState{rid: rid, addr: addr}
-// 	}
-// 	add("S1", opts.S1Addr)
-// 	add("S2", opts.S2Addr)
-// 	add("S3", opts.S3Addr)
-
-// 	// ready1, ready2, ready3 = make(chan struct{}), make(chan struct{}), make(chan struct{})
-
-// 	// Bring up connections (best-effort)
-// 	for _, st := range c.conns {
-// 		// _ = c.dial(st) // mark alive if success
-// 		go c.dial(st)
-// 	}
-
-// 	// Start reader goroutines for each alive conn
-// 	// for _, st := range c.conns {
-// 	// 	if st.alive {
-// 	// 		go c.reader(st)
-// 	// 	}
-// 	// }
-
-//		return c, nil
-//	}
-func New(opts Options) (*Client, error) {
-	if opts.Timeout == 0 {
-		opts.Timeout = 3 * time.Second
-	}
-	c := &Client{
-		id:      opts.ID,
-		reqNum:  opts.StartingReq,
-		timeout: opts.Timeout,
-		conns:   make(map[string]*connState),
-		respCh:  make(chan taggedResp, 16),
-		logger:  log.New("Client"),
-	}
-
-	// Prepare connection map
-	add := func(rid, addr string) {
-		if strings.TrimSpace(addr) == "" {
-			return
-		}
-		c.conns[rid] = &connState{rid: rid, addr: addr}
-	}
-	add("S1", opts.S1Addr)
-	add("S2", opts.S2Addr)
-	add("S3", opts.S3Addr)
-
-	// --- Try connecting to all servers ---
-	fmt.Println("[Client] Connecting to all servers...")
-
+func (c *client) retryDial(addr string) net.Conn {
 	for {
-		allConnected := true
-		for _, st := range c.conns {
-			if !st.alive {
-				conn, err := net.DialTimeout("tcp", st.addr, 500*time.Millisecond)
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			return conn
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func (c *client) handleConnFailure(id string, conn net.Conn) {
+	c.connMutex.Lock()
+	conn.Close()
+	delete(c.conns, id)
+	go c.connectToServer(id, c.serverAddrs[id])
+	c.connMutex.Unlock()
+}
+
+func (c *client) sendToAll(msg types.Message) (types.Response, error) {
+	type result struct {
+		resp types.Response
+		err  error
+	}
+
+	responses := make(chan result, len(c.serverAddrs))
+
+	c.connMutex.Lock()
+	snapshot := make(map[string]net.Conn, len(c.conns))
+	for id, conn := range c.conns {
+		snapshot[id] = conn
+	}
+	c.connMutex.Unlock()
+
+	var wg sync.WaitGroup
+
+	for id, conn := range snapshot {
+		wg.Add(1)
+		go func(id string, conn net.Conn) {
+			var logMsg string
+			enc := json.NewEncoder(conn)
+			if err := enc.Encode(msg); err != nil {
+				responses <- result{err: fmt.Errorf("[%s] send error: %w", id, err)}
+				c.handleConnFailure(id, conn)
+				return
+			}
+			logMsg = fmt.Sprintf("Sent <%s, %s, %d, %s request>", c.id, id, c.reqNum, msg.Message)
+			c.logger.Log(logMsg, "MessageSent")
+			var resp types.Response
+			conn.SetReadDeadline(time.Now().Add(2000 * time.Millisecond))
+			dec := json.NewDecoder(conn)
+			if err := dec.Decode(&resp); err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					responses <- result{err: fmt.Errorf("[%s] recv error: %w", id, err)}
+					return
+				}
+				responses <- result{err: fmt.Errorf("[%s] recv error: %w", id, err)}
+				c.handleConnFailure(id, conn)
+				return
+			}
+
+			responses <- result{resp: resp, err: nil}
+			wg.Done()
+		}(id, conn)
+	}
+
+	if len(snapshot) == 0 {
+		return types.Response{}, fmt.Errorf("no servers currently connected")
+	}
+
+	first := <-responses
+
+	go func() {
+		wg.Wait()
+		close(responses)
+	}()
+
+	return first.resp, first.err
+}
+
+func main() {
+	id := flag.String("id", "C1", "client id")
+	s1Addr := flag.String("s1", "127.0.0.1:8081", "s1 addr")
+	s2Addr := flag.String("s2", "127.0.0.1:8082", "s2 addr")
+	s3Addr := flag.String("s3", "127.0.0.1:8083", "s3 addr")
+	auto := flag.Bool("auto", false, "send messages automatically")
+	flag.Parse()
+
+	serverAddrs := map[string]string{
+		"S1": *s1Addr,
+		"S2": *s2Addr,
+		"S3": *s3Addr,
+	}
+
+	c := &client{
+		id:          *id,
+		serverAddrs: serverAddrs,
+		connMutex:   sync.Mutex{},
+		conns:       make(map[string]net.Conn),
+		primary:     "S1",
+		reqNum:      0,
+		logger:      log.New("Client"),
+	}
+
+	for id, addr := range c.serverAddrs {
+		go c.connectToServer(id, addr)
+	}
+
+	if *auto {
+		ticker := time.NewTicker(2000 * time.Millisecond)
+
+		for {
+			select {
+			case <-ticker.C:
+				msg := types.Message{
+					Type:    "client",
+					Id:      c.id,
+					ReqNum:  c.reqNum,
+					Message: "CountUp",
+				}
+
+				c.reqNum++
+
+				resp, err := c.sendToAll(msg)
 				if err != nil {
-					allConnected = false
-					fmt.Printf("[%s] connect failed: %v\n", st.rid, err)
+					c.reqNum--
 					continue
 				}
-				st.conn = conn
-				st.dec = json.NewDecoder(bufio.NewReader(conn))
-				st.alive = true
-				// go c.reader(st)
-				fmt.Printf("[%s] connected\n", st.rid)
+
+				logMsg := fmt.Sprintf("Received <%s, %s, %d, %s>", c.id, resp.Id, c.reqNum, resp.Response)
+				c.logger.Log(logMsg, "MessageReceived")
 			}
 		}
-		if allConnected {
-			for _, st := range c.conns {
-				go c.reader(st)
-			}
-			break // all 3 servers connected
-		}
-		time.Sleep(1 * time.Second)
-	}
+	} else {
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Println("Enter message type (Init, CountUp, CountDown, Close) or 'exit' to quit:")
 
-	fmt.Println("[Client] All servers connected. Ready to send requests.")
-	return c, nil
-}
-
-func (c *Client) dial(st *connState) error {
-	for {
-		conn, err := net.Dial("tcp", st.addr)
-		if err == nil {
-			st.conn = conn
-			st.dec = json.NewDecoder(bufio.NewReader(conn))
-			st.alive = true
-			go c.reader(st)
-			return nil
-		}
-	}
-}
-
-func (c *Client) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, st := range c.conns {
-		if st.conn != nil {
-			st.conn.Close()
-			st.conn = nil
-			st.alive = false
-		}
-	}
-	close(c.respCh)
-	return nil
-}
-
-func (c *Client) reader(st *connState) {
-	for {
-		if !st.alive || st.conn == nil {
-			return
-		}
-		_ = st.conn.SetReadDeadline(time.Now().Add(c.timeout))
-		var resp types.Response
-		if err := st.dec.Decode(&resp); err != nil {
-			c.respCh <- taggedResp{rid: st.rid, err: err}
-			// mark dead and exit; SendAll may attempt to reconnect
-			c.mu.Lock()
-			if st.conn != nil {
-				st.conn.Close()
-			}
-			st.conn = nil
-			st.alive = false
-			c.mu.Unlock()
-			return
-		}
-		c.respCh <- taggedResp{rid: st.rid, r: resp, err: nil}
-	}
-}
-
-// SendAll sends the same command to all alive replicas, waits for the first
-// reply for the current reqNum, prints duplicates/stale as they arrive, then
-// increments reqNum and returns the first reply.
-func (c *Client) SendAll(command string) (*types.Response, error) {
-	// 1) Send to all alive
-	c.mu.Lock()
-	var logMsg string
-	cur := c.reqNum
-	for _, st := range c.conns {
-		if !st.alive {
-			// // best-effort reconnect
-			// _ = c.dial(st)
-			// if st.alive {
-			// 	go c.reader(st)
-			// }
-			go c.dial(st)
-			continue
-		}
-		if !st.alive || st.conn == nil {
-			continue
-		}
-		msg := types.Message{
-			Type:    "client",
-			Id:      c.id,
-			ReqNum:  cur,
-			Message: command,
-		}
-		data, _ := json.Marshal(msg)
-		_, err := st.conn.Write(data)
-		if err != nil {
-			// mark dead
-			st.conn.Close()
-			st.conn = nil
-			st.alive = false
-			continue
-		}
-		logMsg = fmt.Sprintf("[%s] Sent <%s, %s, %d, request>", ts(), c.id, st.rid, cur)
-		c.logger.Log(logMsg, "MessageSent")
-	}
-	c.mu.Unlock()
-
-	// 2) Wait for first matching reply, log duplicates
-	seen := map[string]bool{}
-	var first *types.Response
-	deadline := time.Now().Add(c.timeout)
-
-	for {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			if first == nil {
-				return nil, fmt.Errorf("timeout waiting for replies for req %d", cur)
-			}
-			break
-		}
-
-		select {
-		case tr, ok := <-c.respCh:
-			var logMsg string
-			if !ok {
-				if first == nil {
-					return nil, fmt.Errorf("client closed")
-				}
+		for {
+			fmt.Print("> ")
+			input, _ := reader.ReadString('\n')
+			input = input[:len(input)-1] // Remove newline
+			if input == "exit" {
+				fmt.Println("Exiting client.")
 				break
 			}
-			if tr.err != nil {
-				// connection died; ignore here (we’ll keep going with others)
+
+			msg := types.Message{
+				Type:    "client",
+				Id:      c.id,
+				ReqNum:  c.reqNum,
+				Message: input,
+			}
+
+			c.reqNum++
+
+			resp, err := c.sendToAll(msg)
+			if err != nil {
+				fmt.Println("Error:", err)
 				continue
 			}
-			// Expect server to set Response.Id = replica_id (S1/S2/S3)
-			rid := tr.r.Id
-			rnum := tr.r.ReqNum
 
-			switch {
-			case rnum < cur:
-				logMsg = fmt.Sprintf("[%s] request_num %d: Late/stale reply from %s discarded", ts(), rnum, rid)
-				c.logger.Log(logMsg, "MessageReceived")
-			case rnum > cur:
-				// future reply (shouldn’t happen), ignore
-			default: // rnum == cur
-				if !seen[rid] {
-					if first == nil {
-						logMsg = fmt.Sprintf("[%s] Received <%s, %s, %d, reply>", ts(), c.id, rid, rnum)
-						c.logger.Log(logMsg, "MessageReceived")
-						cp := tr.r
-						first = &cp
-						seen[rid] = true
-						// we can return soon; keep loop just a tad to catch very fast dups or break immediately
-					} else {
-						logMsg = fmt.Sprintf("[%s] request_num %d: Discarded duplicate reply from %s", ts(), rnum, rid)
-						c.logger.Log(logMsg, "MessageReceived")
-						seen[rid] = true
-					}
-				} else {
-					logMsg = fmt.Sprintf("[%s] request_num %d: Discarded duplicate reply from %s", ts(), rnum, rid)
-					c.logger.Log(logMsg, "MessageReceived")
-				}
-			}
-			if first != nil {
-				// we got the first — advance req and return
-				c.mu.Lock()
-				c.reqNum++
-				c.mu.Unlock()
-				return first, nil
-			}
-		case <-time.After(10 * time.Millisecond):
-			// small tick to honor deadline
+			fmt.Println("Fastest server replied:", resp)
 		}
 	}
-	// should not reach here
-	return first, nil
 }
