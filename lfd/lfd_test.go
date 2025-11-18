@@ -10,7 +10,7 @@ import (
 
 func TestLfdLifecycle_ServerHeartbeat(t *testing.T) {
 	// Create LFD with port 0 (OS assigns free port)
-	l, err := NewLfd(1, "LFD1", "S1", 0, "tcp", 0)
+	l, err := NewLfd(1, "LFD1", "S1", 0, "tcp", 0, "localhost:0")
 	if err != nil {
 		t.Fatalf("failed to create LFD: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestLfdLifecycle_ServerHeartbeatWithFixedPort(t *testing.T) {
 	testPort := 19001
 
 	// Create LFD with fixed port
-	l, err := NewLfd(1, "LFD1", "S1", testPort, "tcp", 0)
+	l, err := NewLfd(1, "LFD1", "S1", testPort, "tcp", 0, "localhost:0")
 	if err != nil {
 		t.Fatalf("failed to create LFD: %v", err)
 	} // Start LFD in background
@@ -118,7 +118,7 @@ func TestLfdLifecycle_ServerHeartbeatWithFixedPort(t *testing.T) {
 func TestLfdServerReconnection(t *testing.T) {
 	testPort := 19002
 
-	l, err := NewLfd(1, "LFD1", "S1", testPort, "tcp", 0)
+	l, err := NewLfd(1, "LFD1", "S1", testPort, "tcp", 0, "localhost:0")
 	if err != nil {
 		t.Fatalf("failed to create LFD: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestLfdGfdHeartbeat(t *testing.T) {
 	}()
 
 	// Create LFD that will connect to our mock GFD
-	l, err := NewLfd(1, "LFD1", "S1", 0, "tcp", gfdPort)
+	l, err := NewLfd(1, "LFD1", "S1", 0, "tcp", gfdPort, gfdAddr.String())
 	if err != nil {
 		t.Fatalf("failed to create LFD: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestLfdGfdHeartbeat(t *testing.T) {
 }
 
 func TestLfdStatus(t *testing.T) {
-	l, err := NewLfd(1, "LFD1", "S1", 0, "tcp", 0)
+	l, err := NewLfd(1, "LFD1", "S1", 0, "tcp", 0, "localhost:0")
 	if err != nil {
 		t.Fatalf("failed to create LFD: %v", err)
 	}
