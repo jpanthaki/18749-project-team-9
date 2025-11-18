@@ -138,7 +138,7 @@ type server struct {
 type internalMessage struct {
 	id         string
 	message    types.Message
-	responseCh chan interface{}
+	responseCh chan types.Response
 
 	conn net.Conn
 }
@@ -214,6 +214,14 @@ func (s *server) manager() {
 					s.handleClientMessage(msg, &resp)
 					s.logSent(resp)
 					msg.responseCh <- resp
+				} else {
+					fmt.Println("ignoring message from", msg.message.Id)
+					msg.responseCh <- types.Response{
+						Type:     "IGNORE",
+						Id:       "IGNORE",
+						ReqNum:   0,
+						Response: "IGNORE",
+					}
 				}
 			case "lfd":
 				s.logHeartbeatReceived(msg.message)
@@ -344,6 +352,7 @@ func (s *server) handleConnection(conn net.Conn) {
 		s.connMu.Lock()
 		delete(s.connections, conn)
 		s.connMu.Unlock()
+		fmt.Println("killed connection in ", s.id)
 	}(conn)
 
 	//fmt.Println("New connection in:", s.id)
@@ -368,12 +377,16 @@ func (s *server) handleConnection(conn net.Conn) {
 		request := internalMessage{
 			id:         msg.Id,
 			message:    msg,
-			responseCh: make(chan interface{}),
+			responseCh: make(chan types.Response),
 			conn:       conn,
 		}
 
 		s.msgCh <- request
 		response := <-request.responseCh
+
+		if response.Type == "IGNORE" {
+			continue
+		}
 
 		respBytes, err := json.Marshal(response)
 		if err != nil {
