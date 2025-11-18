@@ -16,19 +16,23 @@ start_lfd() {
     -port $lfdport -gfdaddr $gfdaddr
 }
 
-# args <id> <replicationMode>{active, passive} <s1Addr> <s2Addr> <s3Addr>
-start_server() {
+# args <id> <s1Addr> <s2Addr> <s3Addr>
+start_server_active() {
     local serverid="S$1"
     local lfdport=$((9000 + $1))
     local serverport=$((8080 + $1))
-    if [ $# -eq 2 ]; then
-        echo "test"
-        go run server/srunner/srunner.go -id $serverid -port $serverport \
-        -lfdPort $lfdport -replicationMode $2
-    elif [ $# -eq 5 ]; then
-        go run server/srunner/srunner.go -id $serverid -port $serverport \
-        -lfdPort $lfdport -replicationMode $2 -s1Addr $3 -s2Addr $4 -s3Addr $5
-    fi
+    go run server-active/srunner/srunner.go -id $serverid -port $serverport \
+        -lfdPort $lfdport -s1Addr $2 -s2Addr $3 -s3Addr $4
+}
+
+# args <id> <isLeader> <s1Addr> <s2Addr> <s3Addr>
+start_server_passive() {
+    local serverid="S$1"
+    local lfdport=$((9000 + $1))
+    local serverport=$((8080 + $1))
+    go run server-passive/srunner/srunner.go -id $serverid -port $serverport \
+        -lfdPort $lfdport -s1Addr $3 -s2Addr $4 -s3Addr $5 \
+        -isLeader $2
 }
 
 # args <id> <s1> <s2> <s3>
@@ -57,14 +61,14 @@ if [ $1 = "lfd" ]; then
     exit 0
 
 elif [ $1 = "server" ]; then
-    if [ $# -eq 3 ]; then
-        echo "starting server with $# args.."
-        start_server $2 $3
-    elif [ $# -eq 6 ]; then
-        echo "starting server with $# args.."
-        start_server $2 $3 $4 $5 $6
+    if [ $2 = "active" ]; then
+        echo "starting active..."
+        start_server_active $3 $4 $5 $6
+    elif [ $2 = "passive" ]; then
+        echo "starting passive..."
+        start_server_passive $3 $4 $5 $6 $7
     else
-        echo "incorect number of args: $# for server"
+        echo "incorect server type"
         exit -1
     fi
     exit 0
