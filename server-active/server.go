@@ -23,12 +23,13 @@ type server struct {
 	highWatermark   int
 	lastReqNum      int
 
-	state   map[string]int
-	isReady bool
-	status  string
-	msgCh   chan internalMessage
-	readyCh chan chan bool
-	closeCh chan struct{}
+	state     map[string]int
+	isReady   bool
+	status    string
+	msgCh     chan internalMessage
+	readyCh   chan struct{}
+	readyOnce sync.Once
+	closeCh   chan struct{}
 
 	connections     map[net.Conn]struct{} // Track active connections
 	peerConnections map[string]net.Conn   //Track other servers
@@ -68,11 +69,13 @@ func NewServer(id string, port int, protocol string, lfdPort int, peers map[stri
 
 		msgCh:           make(chan internalMessage),
 		closeCh:         make(chan struct{}),
+		readyCh:         make(chan struct{}),
 		connections:     make(map[net.Conn]struct{}), // Initialize client map
 		peerConnections: make(map[string]net.Conn),
 		peerMu:          sync.Mutex{},
 		connMu:          sync.Mutex{},
 		watermarkMu:     sync.Mutex{},
+
 		//		readyMu:         sync.Mutex{},
 
 		lfdPort: lfdPort,
@@ -196,22 +199,22 @@ func (s *server) connectToReplicas() {
 		}
 		go s.dialReplica(id, addr)
 	}
-	// attempt to get checkpoint from replica
-	attempts := 0
 
-	bytes, _ := json.Marshal(&attempts)
+	// attempt to get checkpoint from replica
 	msg := types.Message{
 		Type:    "replica",
 		Id:      s.id,
 		ReqNum:  s.checkpointCount,
 		Message: "Recovery",
-		Payload: bytes,
 	}
+	attempts := 0
+	for attempts < 15 {
+		select {
+		case <-s.readyCh:
+			return
+		default:
+		}
 
-	//s.readyMu.Lock()
-	//ready := s.isReady
-	//s.readyMu.Unlock()
-	for !s.isReady {
 		s.peerMu.Lock()
 		for peerId, conn := range s.peerConnections {
 			go func(peerId string, conn net.Conn) {
@@ -221,16 +224,14 @@ func (s *server) connectToReplicas() {
 		}
 		s.peerMu.Unlock()
 		attempts++
-		if attempts == 15 {
-			//s.readyMu.Lock()
-			s.isReady = true
-			//s.readyMu.Unlock()
-			fmt.Printf("No replicas detected, server is ready\n")
-			return
-		}
-		// fmt.Printf("Attempt to send request %d, not ready\n", attempts)
 		time.Sleep(time.Millisecond * 500)
 	}
+	s.readyOnce.Do(func() {
+		s.isReady = true
+		close(s.readyCh)
+		fmt.Println("Server is ready")
+	})
+	fmt.Printf("No replicas detected, server is ready\n")
 }
 
 func (s *server) dialReplica(peerId, addr string) {
@@ -261,24 +262,23 @@ func (s *server) manager() {
 			var resp types.Response
 			switch msg.message.Type {
 			case "client":
-				// TODO: TEST if isReady is asserted, otherwise log to watermark
-				//s.readyMu.Lock()
-				//ready := s.isReady
-				//s.readyMu.Unlock()
 				fmt.Printf("client message received\n")
-				if s.isReady {
+				select {
+				case <-s.readyCh:
 					s.logReceived(msg.message)
 					s.handleClientMessage(msg, &resp)
 					s.logSent(resp)
 					msg.responseCh <- resp
-				} else {
+				default:
 					s.watermarkMu.Lock()
 					if msg.message.ReqNum > s.highWatermark {
 						s.highWatermark = msg.message.ReqNum
 					}
 					fmt.Printf("new watermark: %d\n", s.highWatermark)
 					s.watermarkMu.Unlock()
+					msg.responseCh <- resp
 				}
+
 			case "lfd":
 				s.logHeartbeatReceived(msg.message)
 				s.handleLFDMessage(msg, &resp)
@@ -288,6 +288,7 @@ func (s *server) manager() {
 				s.handleReplicaMessage(msg)
 				msg.responseCh <- resp
 			}
+
 		}
 	}
 }
@@ -373,20 +374,37 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 	case "Checkpoint":
 		var chk types.Checkpoint
 		_ = json.Unmarshal(msg.message.Payload, &chk)
-		s.watermarkMu.Lock()
 		fmt.Printf("highWatermark: %d, LastReqNum: %d\n", s.highWatermark, chk.LastReqNum)
 		//s.readyMu.Lock()
 		//ready := s.isReady
 		//s.readyMu.Unlock()
-		if (chk.LastReqNum >= s.highWatermark) && !s.isReady {
+		select {
+		case <-s.readyCh:
+			return
+		default:
+			s.watermarkMu.Lock()
+			if chk.LastReqNum < s.highWatermark {
+				return
+			}
+			s.watermarkMu.Unlock()
+			s.readyOnce.Do(func() {
+				s.isReady = true
+				close(s.readyCh)
+				s.state = cloneState(chk.State)
+				fmt.Println("Server is ready")
+			})
+		}
+		/* if (chk.LastReqNum >= s.highWatermark) && !s.isReady {
 			s.checkpointCount = chk.CheckpointNum
 			s.state = cloneState(chk.State)
-			//s.readyMu.Lock()
-			s.isReady = true
-			//s.readyMu.Unlock()
+			s.readyOnce.Do(func() {
+				s.isReady = true
+				close(s.readyCh)
+				fmt.Println("Server is ready")
+			})
 			fmt.Printf("checkpoint received, server is ready\n")
 		}
-		s.watermarkMu.Unlock()
+		s.watermarkMu.Unlock()*/
 	}
 }
 
