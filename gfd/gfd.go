@@ -18,6 +18,7 @@ type gfd struct {
 	memberCount int
 
 	connections map[net.Conn]struct{}
+	rmConn      net.Conn // Connection to RM
 
 	msgCh chan struct {
 		id         string
@@ -102,6 +103,7 @@ func (g *gfd) manager() {
 				msg.responseCh <- resp
 				logMsg = fmt.Sprintf("Adding server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
 				g.logger.Log(logMsg, "AddingServer")
+				g.notifyRM("add", msg.id)
 			case "remove":
 				g.membership[msg.id] = false
 				g.memberCount--
@@ -118,6 +120,8 @@ func (g *gfd) manager() {
 				msg.responseCh <- resp
 				logMsg = fmt.Sprintf("Removing server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
 				g.logger.Log(logMsg, "RemovingServer")
+				// Notify RM of membership change
+				g.notifyRM("remove", msg.id)
 			case "heartbeat":
 				logMsg = fmt.Sprintf("[%d] GFD receives heartbeat from %s", msg.message.ReqNum, msg.id)
 				g.logger.Log(logMsg, "LFDHeartbeatReceived")
@@ -129,6 +133,35 @@ func (g *gfd) manager() {
 		case <-g.closeCh:
 			return
 		}
+	}
+}
+
+func (g *gfd) notifyRM(action string, serverId string) {
+	if g.rmConn == nil {
+		return
+	}
+
+	msg := types.Message{
+		Type:    "gfd",
+		Id:      serverId,
+		Message: action,
+		ReqNum:  g.memberCount,
+	}
+
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	// Check again before write to avoid race condition
+	if g.rmConn == nil {
+		return
+	}
+
+	_, err = g.rmConn.Write(msgBytes)
+	if err != nil {
+		// RM connection lost
+		g.rmConn = nil
 	}
 }
 
@@ -150,6 +183,77 @@ func (g *gfd) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	defer delete(g.connections, conn)
 
+	// Read first message to determine connection type
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return
+	}
+
+	var msg types.Message
+	err = json.Unmarshal(buf[:n], &msg)
+	if err != nil {
+		return
+	}
+
+	// Check if this is RM registering
+	if msg.Type == "rm" && msg.Message == "register" {
+		g.rmConn = conn
+		logMsg := "RM registered with GFD"
+		g.logger.Log(logMsg, "RMRegistered")
+
+		// Send initial membership to RM
+		initialMsg := types.Message{
+			Type:    "gfd",
+			Id:      "",
+			Message: "initial",
+			ReqNum:  g.memberCount,
+		}
+		initialBytes, _ := json.Marshal(initialMsg)
+		conn.Write(initialBytes)
+
+		// Keep connection open for RM
+		for {
+			buf := make([]byte, 1024)
+			_, err := conn.Read(buf)
+			if err != nil {
+				g.rmConn = nil
+				return
+			}
+		}
+		return
+	}
+
+	// Handle LFD connections
+	if msg.Type != "lfd" {
+		return
+	}
+
+	// Process first LFD message
+	request := struct {
+		id         string
+		message    types.Message
+		responseCh chan types.Response
+	}{
+		id:         msg.Id,
+		message:    msg,
+		responseCh: make(chan types.Response),
+	}
+
+	g.msgCh <- request
+	response := <-request.responseCh
+
+	respBytes, err := json.Marshal(response)
+	if err != nil {
+		return
+	}
+
+	_, err = conn.Write(respBytes)
+	if err != nil {
+		return
+	}
+
+	// Continue handling subsequent LFD messages
 	for {
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)

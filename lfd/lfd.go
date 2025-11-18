@@ -27,14 +27,13 @@ type lfd struct {
 	closeCh            chan struct{}
 
 	gfdPort            int
-	gfdAddr            string
 	gfdConn            net.Conn
 	gfdHeartbeatCount  int
 	serverRegistered   bool // Track if server has been registered with GFD
 	firstHeartbeatDone bool // Track if first heartbeat to server succeeded
 }
 
-func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protocol string, gfdPort int, gfdAddr string) (Lfd, error) {
+func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protocol string, gfdPort int) (Lfd, error) {
 	l := &lfd{
 		id:                 id,
 		serverID:           serverID,
@@ -45,7 +44,6 @@ func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protoc
 		heartbeatFrequency: heartbeatFrequency,
 		closeCh:            make(chan struct{}),
 		gfdPort:            gfdPort,
-		gfdAddr:            gfdAddr,
 		gfdHeartbeatCount:  1,
 		serverRegistered:   false,
 		firstHeartbeatDone: false,
@@ -141,12 +139,12 @@ func (l *lfd) heartbeatLoop() {
 
 func (l *lfd) connectToGFD() {
 	for {
-		//conn, err := net.Dial(l.protocol, ":"+strconv.Itoa(l.gfdPort))
-		conn, err := net.Dial(l.protocol, l.gfdAddr)
+		conn, err := net.Dial(l.protocol, ":"+strconv.Itoa(l.gfdPort))
 		if err == nil {
 			fmt.Printf("[%s] %s connected to GFD on port %d\n", time.Now().Format("2006-01-02 15:04:05"), l.id, l.gfdPort)
 			l.gfdConn = conn
 			go l.gfdHeartbeatLoop()
+			go l.listenFromGFD()
 			return
 		}
 		time.Sleep(1 * time.Second)
@@ -353,4 +351,65 @@ func (l *lfd) notifyGFDDeleteReplica() {
 
 	var resp types.Response
 	json.Unmarshal(buf[:n], &resp)
+}
+
+// listenFromGFD listens for asynchronous messages from GFD (like promotion notifications)
+func (l *lfd) listenFromGFD() {
+	for {
+		select {
+		case <-l.closeCh:
+			return
+		default:
+			if l.gfdConn == nil {
+				return
+			}
+
+			// Set a read deadline so we don't block forever
+			l.gfdConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			buf := make([]byte, 1024)
+			n, err := l.gfdConn.Read(buf)
+			if err != nil {
+				// Timeout or connection error - just continue
+				continue
+			}
+
+			var msg types.Message
+			err = json.Unmarshal(buf[:n], &msg)
+			if err != nil {
+				continue
+			}
+
+			// Handle promotion message from GFD
+			if msg.Type == "gfd" && msg.Message == "promote" {
+				fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
+				l.forwardPromotionToServer()
+			}
+		}
+	}
+}
+
+// forwardPromotionToServer forwards the promotion message to the server
+func (l *lfd) forwardPromotionToServer() {
+	if l.conn == nil {
+		return
+	}
+
+	msg := types.Message{
+		Type:    "lfd",
+		Id:      l.serverID,
+		Message: "promote",
+		ReqNum:  0,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	_, err = l.conn.Write(data)
+	if err != nil {
+		return
+	}
+
+	fmt.Printf("\033[32m[%s] %s forwarded promotion to server %s\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id, l.serverID)
 }

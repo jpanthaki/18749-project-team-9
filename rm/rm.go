@@ -32,6 +32,7 @@ type rm struct {
 	logger *log.Logger
 }
 
+// Basic initialization
 func NewRM(port int, protocol string, gfdPort int) (RM, error) {
 	r := &rm{
 		port:        port,
@@ -54,7 +55,7 @@ func (r *rm) Start() error {
 	}
 	r.gfdConn = conn
 
-	// Send registration message
+	// Send message to register with GFD
 	regMsg := types.Message{Type: "rm", Id: "1", Message: "register", ReqNum: 0}
 	msgBytes, _ := json.Marshal(regMsg)
 	_, err = r.gfdConn.Write(msgBytes)
@@ -62,6 +63,7 @@ func (r *rm) Start() error {
 		return fmt.Errorf("failed to register with GFD: %w", err)
 	}
 
+	// Manage replicas and listen for GFD for failures
 	go r.manager()
 	go r.listenToGFD()
 
@@ -94,7 +96,7 @@ func (r *rm) manager() {
 			case "add":
 				r.membership[msg.Id] = true
 				r.memberCount++
-				// Only elect primary if we don't have one
+				// elect primary if this is the first member
 				if r.primary == "" {
 					r.electPrimary()
 				}
@@ -129,24 +131,58 @@ func (r *rm) listenToGFD() {
 			continue
 		}
 
+		// Feed into channel for manager
 		r.msgCh <- msg
 	}
 }
 
 func (r *rm) electPrimary() {
-	// Pick any living member as primary
+	oldPrimary := r.primary
 	r.primary = ""
 	for id, alive := range r.membership {
 		if alive {
 			r.primary = id
 			logMsg := fmt.Sprintf("New primary elected: %s", r.primary)
 			r.logger.Log(logMsg, "PrimaryElected")
+
+			// Notify GFD of new primary promotion (only if primary changed)
+			if oldPrimary != r.primary {
+				r.notifyGFDPromotion(r.primary)
+			}
 			return
 		}
 	}
 	// No living members
 	logMsg := "No primary available (no living members)"
 	r.logger.Log(logMsg, "NoPrimary")
+}
+
+func (r *rm) notifyGFDPromotion(primaryId string) {
+	if r.gfdConn == nil {
+		return
+	}
+
+	msg := types.Message{
+		Type:    "rm",
+		Id:      primaryId,
+		Message: "promote",
+		ReqNum:  0,
+	}
+
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	_, err = r.gfdConn.Write(msgBytes)
+	if err != nil {
+		// GFD connection lost
+		r.gfdConn = nil
+		return
+	}
+
+	logMsg := fmt.Sprintf("Notified GFD of primary promotion: %s", primaryId)
+	r.logger.Log(logMsg, "PromotionNotification")
 }
 
 func (r *rm) printMembership(action string, serverId string) {
