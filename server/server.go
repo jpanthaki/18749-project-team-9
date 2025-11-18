@@ -286,6 +286,16 @@ func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) 
 }
 
 func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
+	// Check if this is a promotion message
+	if msg.message.Message == "promote" {
+		s.isLeader = true
+		logMsg := fmt.Sprintf("Server %s promoted to primary", s.id)
+		s.logger.Log(logMsg, "PromotedToPrimary")
+		*resp = types.Response{Type: "lfd", Id: s.id, ReqNum: msg.message.ReqNum, Response: "promoted"}
+		return
+	}
+
+	// Default heartbeat response
 	*resp = types.Response{Type: "lfd", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
 }
 

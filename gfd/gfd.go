@@ -178,6 +178,39 @@ func (g *gfd) notifyRM(action string, serverId string) {
 	}
 }
 
+func (g *gfd) forwardPromotionToLFD(serverID string) {
+	g.lfdConnMu.Lock()
+	conn, exists := g.lfdConns[serverID]
+	g.lfdConnMu.Unlock()
+
+	if !exists {
+		return
+	}
+
+	msg := types.Message{
+		Type:    "gfd",
+		Id:      serverID,
+		Message: "promote",
+		ReqNum:  0,
+	}
+
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	_, err = conn.Write(msgBytes)
+	if err != nil {
+		g.lfdConnMu.Lock()
+		delete(g.lfdConns, serverID)
+		g.lfdConnMu.Unlock()
+		return
+	}
+
+	logMsg := fmt.Sprintf("Forwarding promotion to LFD for server %s", serverID)
+	g.logger.Log(logMsg, "PromotionForwarded")
+}
+
 func (g *gfd) listen(readyCh chan struct{}) {
 	close(readyCh)
 	defer g.listener.Close()
@@ -225,16 +258,27 @@ func (g *gfd) handleConnection(conn net.Conn) {
 		initialBytes, _ := json.Marshal(initialMsg)
 		conn.Write(initialBytes)
 
-		// Keep connection open for RM
+		// Keep connection open for RM and listen for promotion messages
 		for {
 			buf := make([]byte, 1024)
-			_, err := conn.Read(buf)
+			n, err := conn.Read(buf)
 			if err != nil {
 				g.rmConn = nil
 				return
 			}
+
+			// Parse message from RM
+			var rmMsg types.Message
+			err = json.Unmarshal(buf[:n], &rmMsg)
+			if err != nil {
+				continue
+			}
+
+			// Handle promotion message
+			if rmMsg.Message == "promote" {
+				g.forwardPromotionToLFD(rmMsg.Id)
+			}
 		}
-		return
 	}
 
 	// Handle LFD connections
@@ -246,10 +290,12 @@ func (g *gfd) handleConnection(conn net.Conn) {
 	request := struct {
 		id         string
 		message    types.Message
+		conn       net.Conn
 		responseCh chan types.Response
 	}{
 		id:         msg.Id,
 		message:    msg,
+		conn:       conn,
 		responseCh: make(chan types.Response),
 	}
 
