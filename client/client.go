@@ -141,9 +141,17 @@ func main() {
 		logger:      log.New("Client"),
 	}
 
+	var wg sync.WaitGroup
+
 	for id, addr := range c.serverAddrs {
-		go c.connectToServer(id, addr)
+		wg.Add(1)
+		go func(id, addr string) {
+			defer wg.Done()
+			c.connectToServer(id, addr)
+		}(id, addr)
 	}
+
+	wg.Wait()
 
 	if *auto {
 		ticker := time.NewTicker(2000 * time.Millisecond)

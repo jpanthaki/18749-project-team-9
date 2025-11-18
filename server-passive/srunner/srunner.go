@@ -19,6 +19,7 @@ func main() {
 	s1Addr := flag.String("s1Addr", "127.0.0.1:8081", "address of the s1 server")
 	s2Addr := flag.String("s2Addr", "127.0.0.1:8082", "address of the s2 server")
 	s3Addr := flag.String("s3Addr", "127.0.0.1:8083", "address of the s3 server")
+	checkpointFreq := flag.Int("checkpointFreq", 4000, "passive replication checkpoint frequency")
 	flag.Parse()
 
 	peerMap := map[string]string{
@@ -29,7 +30,7 @@ func main() {
 
 	fmt.Printf("Starting server at address %s:%d with ID: %s, Protocol: %s\n", helpers.GetLocalIP(), *port, *id, *protocol)
 
-	sv, err := server.NewServer(*id, *port, *protocol, *lfdPort, 4000, peerMap)
+	sv, err := server.NewServer(*id, *port, *protocol, *lfdPort, *checkpointFreq, peerMap)
 	if err != nil {
 		panic(err)
 	}
