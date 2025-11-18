@@ -193,7 +193,6 @@ func (s *server) dialReplica(peerId, addr string) {
 			s.peerMu.Lock()
 			s.peerConnections[peerId] = conn
 			s.peerMu.Unlock()
-			//fmt.Println("Connection made to: ", peerId)
 			return
 		}
 	}
@@ -215,7 +214,6 @@ func (s *server) manager() {
 					s.logSent(resp)
 					msg.responseCh <- resp
 				} else {
-					fmt.Println("ignoring message from", msg.message.Id)
 					msg.responseCh <- types.Response{
 						Type:     "IGNORE",
 						Id:       "IGNORE",
@@ -352,27 +350,19 @@ func (s *server) handleConnection(conn net.Conn) {
 		s.connMu.Lock()
 		delete(s.connections, conn)
 		s.connMu.Unlock()
-		fmt.Println("killed connection in ", s.id)
 	}(conn)
-
-	//fmt.Println("New connection in:", s.id)
 
 	for {
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)
-		//fmt.Println("After Read in:", s.id)
 		if err != nil {
-			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 		var msg types.Message
 		err = json.Unmarshal(buf[:n], &msg)
 		if err != nil {
-			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
-
-		//fmt.Println(s.id, msg)
 
 		request := internalMessage{
 			id:         msg.Id,
@@ -390,14 +380,11 @@ func (s *server) handleConnection(conn net.Conn) {
 
 		respBytes, err := json.Marshal(response)
 		if err != nil {
-			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 
 		_, err = conn.Write(respBytes)
-		//fmt.Println("After Write in:", s.id)
 		if err != nil {
-			// fmt.Printf("Error in %s, %v", s.id, err)
 			return
 		}
 	}

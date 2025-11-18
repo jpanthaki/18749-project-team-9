@@ -5,6 +5,7 @@ import (
 	"18749-team9/types"
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -75,14 +76,15 @@ func (c *client) sendToAll(msg types.Message) (types.Response, error) {
 	for id, conn := range snapshot {
 		wg.Add(1)
 		go func(id string, conn net.Conn) {
-			fmt.Println("Sending to...", id)
+			var logMsg string
 			enc := json.NewEncoder(conn)
 			if err := enc.Encode(msg); err != nil {
 				responses <- result{err: fmt.Errorf("[%s] send error: %w", id, err)}
 				c.handleConnFailure(id, conn)
 				return
 			}
-			fmt.Println("Sent to", id)
+			logMsg = fmt.Sprintf("Sent <%s, %s, %d, %s request>", c.id, id, c.reqNum, msg.Message)
+			c.logger.Log(logMsg, "MessageSent")
 			var resp types.Response
 			conn.SetReadDeadline(time.Now().Add(2000 * time.Millisecond))
 			dec := json.NewDecoder(conn)
@@ -95,8 +97,6 @@ func (c *client) sendToAll(msg types.Message) (types.Response, error) {
 				c.handleConnFailure(id, conn)
 				return
 			}
-
-			fmt.Println("Response from", id)
 
 			responses <- result{resp: resp, err: nil}
 			wg.Done()
@@ -118,14 +118,21 @@ func (c *client) sendToAll(msg types.Message) (types.Response, error) {
 }
 
 func main() {
+	id := flag.String("id", "C1", "client id")
+	s1Addr := flag.String("s1", "127.0.0.1:8081", "s1 addr")
+	s2Addr := flag.String("s2", "127.0.0.1:8082", "s2 addr")
+	s3Addr := flag.String("s3", "127.0.0.1:8083", "s3 addr")
+	auto := flag.Bool("auto", false, "send messages automatically")
+	flag.Parse()
+
 	serverAddrs := map[string]string{
-		"S1": "127.0.0.1:8081",
-		"S2": "127.0.0.1:8082",
-		"S3": "127.0.0.1:8083",
+		"S1": *s1Addr,
+		"S2": *s2Addr,
+		"S3": *s3Addr,
 	}
 
 	c := &client{
-		id:          "C1",
+		id:          *id,
 		serverAddrs: serverAddrs,
 		connMutex:   sync.Mutex{},
 		conns:       make(map[string]net.Conn),
@@ -138,33 +145,60 @@ func main() {
 		go c.connectToServer(id, addr)
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Enter message type (Init, CountUp, CountDown, Close) or 'exit' to quit:")
+	if *auto {
+		ticker := time.NewTicker(2000 * time.Millisecond)
 
-	for {
-		fmt.Print("> ")
-		input, _ := reader.ReadString('\n')
-		input = input[:len(input)-1] // Remove newline
-		if input == "exit" {
-			fmt.Println("Exiting client.")
-			break
+		for {
+			select {
+			case <-ticker.C:
+				msg := types.Message{
+					Type:    "client",
+					Id:      c.id,
+					ReqNum:  c.reqNum,
+					Message: "CountUp",
+				}
+
+				c.reqNum++
+
+				resp, err := c.sendToAll(msg)
+				if err != nil {
+					c.reqNum--
+					continue
+				}
+
+				logMsg := fmt.Sprintf("Received <%s, %s, %d, %s>", c.id, resp.Id, c.reqNum, resp.Response)
+				c.logger.Log(logMsg, "MessageReceived")
+			}
 		}
+	} else {
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Println("Enter message type (Init, CountUp, CountDown, Close) or 'exit' to quit:")
 
-		msg := types.Message{
-			Type:    "client",
-			Id:      c.id,
-			ReqNum:  c.reqNum,
-			Message: input,
+		for {
+			fmt.Print("> ")
+			input, _ := reader.ReadString('\n')
+			input = input[:len(input)-1] // Remove newline
+			if input == "exit" {
+				fmt.Println("Exiting client.")
+				break
+			}
+
+			msg := types.Message{
+				Type:    "client",
+				Id:      c.id,
+				ReqNum:  c.reqNum,
+				Message: input,
+			}
+
+			c.reqNum++
+
+			resp, err := c.sendToAll(msg)
+			if err != nil {
+				fmt.Println("Error:", err)
+				continue
+			}
+
+			fmt.Println("Fastest server replied:", resp)
 		}
-
-		c.reqNum++
-
-		resp, err := c.sendToAll(msg)
-		if err != nil {
-			fmt.Println("Error:", err)
-			continue
-		}
-
-		fmt.Println("Fastest server replied:", resp)
 	}
 }
