@@ -238,7 +238,6 @@ func (s *server) manager() {
 			var resp types.Response
 			switch msg.message.Type {
 			case "client":
-				fmt.Printf("client message received\n")
 				select {
 				case <-s.readyCh:
 					s.logReceived(msg.message)
@@ -313,7 +312,6 @@ func (s *server) sendActiveCheckpoint(reqID string) {
 
 func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) {
 	s.lastReqNum = msg.message.ReqNum
-	fmt.Printf("message type %s received\n", msg.message.Type)
 	switch msg.message.Message {
 	case "Init":
 		s.logBefore(msg.message)
@@ -346,16 +344,10 @@ func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 func (s *server) handleReplicaMessage(msg internalMessage) {
 	switch msg.message.Message {
 	case "Recovery":
-		select {
-		case <-s.readyCh:
-			s.sendActiveCheckpoint(msg.message.Id)
-		default:
-			return
-		}
+		s.sendActiveCheckpoint(msg.message.Id)
 	case "Checkpoint":
 		var chk types.Checkpoint
 		_ = json.Unmarshal(msg.message.Payload, &chk)
-		fmt.Printf("highWatermark: %d, LastReqNum: %d\n", s.highWatermark, chk.LastReqNum)
 		select {
 		case <-s.readyCh:
 			return
