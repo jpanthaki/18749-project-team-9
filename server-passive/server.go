@@ -105,6 +105,10 @@ func (s *server) Ready() bool {
 	return s.isReady
 }
 
+func (s *server) IsLeader() bool {
+	return s.isLeader
+}
+
 type server struct {
 	id       string
 	port     int
@@ -316,6 +320,7 @@ func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) 
 }
 
 func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
+	// Default heartbeat response
 	*resp = types.Response{Type: "lfd", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
 }
 

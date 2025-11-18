@@ -102,6 +102,10 @@ func (s *server) Ready() bool {
 	return s.isReady
 }
 
+func (s *server) IsLeader() bool {
+	return s.isLeader
+}
+
 type server struct {
 	id       string
 	port     int

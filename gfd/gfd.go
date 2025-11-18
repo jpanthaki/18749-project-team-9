@@ -18,9 +18,10 @@ type gfd struct {
 	membership  map[string]bool
 	memberCount int
 
-	lfdConns    map[string]net.Conn
-	connections map[net.Conn]struct{}
-	rmConn      net.Conn // Connection to RM
+	lfdConns       map[string]net.Conn // maps serverID to LFD connection
+	connToServerId map[net.Conn]string // inversion of lfdConns map
+	connections    map[net.Conn]struct{}
+	rmConn         net.Conn // Connection to RM
 
 	lfdConnMu sync.Mutex
 
@@ -37,13 +38,14 @@ type gfd struct {
 
 func NewGfd(port int, protocol string) (Gfd, error) {
 	g := &gfd{
-		port:        port,
-		protocol:    protocol,
-		membership:  make(map[string]bool),
-		memberCount: 0,
-		connections: make(map[net.Conn]struct{}),
-		lfdConns:    make(map[string]net.Conn),
-		lfdConnMu:   sync.Mutex{},
+		port:           port,
+		protocol:       protocol,
+		membership:     make(map[string]bool),
+		memberCount:    0,
+		connections:    make(map[net.Conn]struct{}),
+		lfdConns:       make(map[string]net.Conn),
+		connToServerId: make(map[net.Conn]string),
+		lfdConnMu:      sync.Mutex{},
 		msgCh: make(chan struct {
 			id         string
 			message    types.Message
@@ -98,6 +100,13 @@ func (g *gfd) manager() {
 			case "add":
 				g.membership[msg.id] = true
 				g.memberCount++
+
+				// Store the connection-to-serverID mapping AND the LFD connection immediately
+				g.lfdConnMu.Lock()
+				g.connToServerId[msg.conn] = msg.id
+				g.lfdConns[msg.id] = msg.conn // Store connection by serverID immediately
+				g.lfdConnMu.Unlock()
+
 				livingServers := strings.Join(func(m map[string]bool) []string {
 					var s []string
 					for k, v := range m {
@@ -184,13 +193,18 @@ func (g *gfd) forwardPromotionToLFD(serverID string) {
 	g.lfdConnMu.Unlock()
 
 	if !exists {
+		logMsg := fmt.Sprintf("Cannot forward promotion: no LFD connection for server %s", serverID)
+		g.logger.Log(logMsg, "PromotionForwardFailed")
 		return
 	}
 
+	logMsg2 := fmt.Sprintf("Forwarding promotion to LFD for server %s", serverID)
+	g.logger.Log(logMsg2, "PromotionForward")
+
 	msg := types.Message{
-		Type:    "gfd",
+		Type:    "rm", // Changed from "gfd" to "rm" for consistency
 		Id:      serverID,
-		Message: "promote",
+		Message: "Promote", // Changed from "promote" to "Promote" to match handleRMMessage
 		ReqNum:  0,
 	}
 

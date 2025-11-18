@@ -9,4 +9,6 @@ type Server interface {
 	Status() string
 	// will return true if the server is ready to accept connections.
 	Ready() bool
+	// will return true if the server is the leader/primary.
+	IsLeader() bool
 }
