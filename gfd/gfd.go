@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 )
 
 type gfd struct {
@@ -17,12 +18,16 @@ type gfd struct {
 	membership  map[string]bool
 	memberCount int
 
+	lfdConns    map[string]net.Conn
 	connections map[net.Conn]struct{}
 	rmConn      net.Conn // Connection to RM
+
+	lfdConnMu sync.Mutex
 
 	msgCh chan struct {
 		id         string
 		message    types.Message
+		conn       net.Conn
 		responseCh chan types.Response
 	}
 	closeCh chan struct{}
@@ -37,9 +42,12 @@ func NewGfd(port int, protocol string) (Gfd, error) {
 		membership:  make(map[string]bool),
 		memberCount: 0,
 		connections: make(map[net.Conn]struct{}),
+		lfdConns:    make(map[string]net.Conn),
+		lfdConnMu:   sync.Mutex{},
 		msgCh: make(chan struct {
 			id         string
 			message    types.Message
+			conn       net.Conn
 			responseCh chan types.Response
 		}),
 		closeCh: make(chan struct{}),
@@ -123,6 +131,11 @@ func (g *gfd) manager() {
 				// Notify RM of membership change
 				g.notifyRM("remove", msg.id)
 			case "heartbeat":
+				g.lfdConnMu.Lock()
+				if _, ok := g.lfdConns[msg.id]; !ok {
+					g.lfdConns[msg.id] = msg.conn
+				}
+				g.lfdConnMu.Unlock()
 				logMsg = fmt.Sprintf("[%d] GFD receives heartbeat from %s", msg.message.ReqNum, msg.id)
 				g.logger.Log(logMsg, "LFDHeartbeatReceived")
 				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Alive"}
@@ -274,10 +287,12 @@ func (g *gfd) handleConnection(conn net.Conn) {
 		request := struct {
 			id         string
 			message    types.Message
+			conn       net.Conn
 			responseCh chan types.Response
 		}{
 			id:         msg.Id,
 			message:    msg,
+			conn:       conn,
 			responseCh: make(chan types.Response),
 		}
 
