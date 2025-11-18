@@ -38,7 +38,7 @@ start_client() {
     local s2="$3"
     local s3="$4"
     local think="0.5s"
-    go run client/crunner/crunner.go -s1 $s1 -s2 $s2 -s3 $s3 -id $clientid -think $think
+    go run client/client.go -s1 $s1 -s2 $s2 -s3 $s3 -id $clientid -auto
 }
 
 # args none
