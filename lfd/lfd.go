@@ -27,13 +27,14 @@ type lfd struct {
 	closeCh            chan struct{}
 
 	gfdPort            int
+	gfdAddr            string
 	gfdConn            net.Conn
 	gfdHeartbeatCount  int
 	serverRegistered   bool // Track if server has been registered with GFD
 	firstHeartbeatDone bool // Track if first heartbeat to server succeeded
 }
 
-func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protocol string, gfdPort int) (Lfd, error) {
+func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protocol string, gfdPort int, gfdAddr string) (Lfd, error) {
 	l := &lfd{
 		id:                 id,
 		serverID:           serverID,
@@ -44,6 +45,7 @@ func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protoc
 		heartbeatFrequency: heartbeatFrequency,
 		closeCh:            make(chan struct{}),
 		gfdPort:            gfdPort,
+		gfdAddr:            gfdAddr,
 		gfdHeartbeatCount:  1,
 		serverRegistered:   false,
 		firstHeartbeatDone: false,
@@ -139,9 +141,9 @@ func (l *lfd) heartbeatLoop() {
 
 func (l *lfd) connectToGFD() {
 	for {
-		conn, err := net.Dial(l.protocol, ":"+strconv.Itoa(l.gfdPort))
+		conn, err := net.Dial(l.protocol, l.gfdAddr)
 		if err == nil {
-			fmt.Printf("[%s] %s connected to GFD on port %d\n", time.Now().Format("2006-01-02 15:04:05"), l.id, l.gfdPort)
+			fmt.Printf("[%s] %s connected to GFD at %s\n", time.Now().Format("2006-01-02 15:04:05"), l.id, l.gfdAddr)
 			l.gfdConn = conn
 			go l.gfdHeartbeatLoop()
 			go l.listenFromGFD()
