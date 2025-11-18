@@ -36,7 +36,6 @@ type server struct {
 	peerMu          sync.Mutex
 	connMu          sync.Mutex
 	watermarkMu     sync.Mutex
-	//readyMu         sync.Mutex
 
 	lfdPort int
 	lfdConn net.Conn
@@ -69,7 +68,7 @@ func NewServer(id string, port int, protocol string, lfdPort int, peers map[stri
 
 		msgCh:           make(chan internalMessage),
 		closeCh:         make(chan struct{}),
-		readyCh:         make(chan struct{}),
+		readyCh:         make(chan struct{}),         // closed once when server is ready
 		connections:     make(map[net.Conn]struct{}), // Initialize client map
 		peerConnections: make(map[string]net.Conn),
 		peerMu:          sync.Mutex{},
@@ -168,22 +167,6 @@ func (s *server) listen(readyCh chan struct{}) {
 			return
 		}
 
-		/* var msg types.Message
-		if err := json.NewDecoder(conn).Decode(&msg); err != nil {
-			fmt.Println("Failed to read handshake:", err)
-			conn.Close()
-			continue
-		}
-		if msg.Type == "replica" {
-			s.peerMu.Lock()
-			s.peerConnections[msg.Id] = conn
-			s.peerMu.Unlock()
-			fmt.Printf("Registered replica connection from %s\n", msg.Id)
-		} else {
-			s.connMu.Lock()
-			s.connections[conn] = struct{}{} // Add the new connection to the clients map
-			s.connMu.Unlock()
-		}*/
 		s.connections[conn] = struct{}{} // Add the new connection to the clients map
 
 		go s.handleConnection(conn)
@@ -191,7 +174,7 @@ func (s *server) listen(readyCh chan struct{}) {
 }
 
 // attempt to receive checkpoint
-// if no checkpoint received after 5 attempts, declares itself ready
+// if no checkpoint received after 15 attempts, declares itself ready
 func (s *server) connectToReplicas() {
 	for id, addr := range s.peers {
 		if id == s.id {
@@ -238,18 +221,11 @@ func (s *server) dialReplica(peerId, addr string) {
 	for {
 		conn, err := net.DialTimeout(s.protocol, addr, 500*time.Millisecond)
 		if err == nil {
-			/*handshake := types.Message{
-				Type:    "replica",
-				Id:      s.id,
-				Message: "Handshake",
-			}
-			_ = json.NewEncoder(conn).Encode(handshake)*/
 			s.peerMu.Lock()
 			s.peerConnections[peerId] = conn
 			s.peerMu.Unlock()
 			return
 		}
-		// time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -370,14 +346,16 @@ func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 func (s *server) handleReplicaMessage(msg internalMessage) {
 	switch msg.message.Message {
 	case "Recovery":
-		s.sendActiveCheckpoint(msg.message.Id)
+		select {
+		case <-s.readyCh:
+			s.sendActiveCheckpoint(msg.message.Id)
+		default:
+			return
+		}
 	case "Checkpoint":
 		var chk types.Checkpoint
 		_ = json.Unmarshal(msg.message.Payload, &chk)
 		fmt.Printf("highWatermark: %d, LastReqNum: %d\n", s.highWatermark, chk.LastReqNum)
-		//s.readyMu.Lock()
-		//ready := s.isReady
-		//s.readyMu.Unlock()
 		select {
 		case <-s.readyCh:
 			return
@@ -394,17 +372,6 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 				fmt.Println("Server is ready")
 			})
 		}
-		/* if (chk.LastReqNum >= s.highWatermark) && !s.isReady {
-			s.checkpointCount = chk.CheckpointNum
-			s.state = cloneState(chk.State)
-			s.readyOnce.Do(func() {
-				s.isReady = true
-				close(s.readyCh)
-				fmt.Println("Server is ready")
-			})
-			fmt.Printf("checkpoint received, server is ready\n")
-		}
-		s.watermarkMu.Unlock()*/
 	}
 }
 
