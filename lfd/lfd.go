@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -29,6 +30,7 @@ type lfd struct {
 	gfdPort            int
 	gfdAddr            string
 	gfdConn            net.Conn
+	gfdConnMu          sync.Mutex // Protects gfdConn access
 	gfdHeartbeatCount  int
 	serverRegistered   bool // Track if server has been registered with GFD
 	firstHeartbeatDone bool // Track if first heartbeat to server succeeded
@@ -144,37 +146,105 @@ func (l *lfd) connectToGFD() {
 		conn, err := net.Dial(l.protocol, l.gfdAddr)
 		if err == nil {
 			fmt.Printf("[%s] %s connected to GFD at %s\n", time.Now().Format("2006-01-02 15:04:05"), l.id, l.gfdAddr)
+			l.gfdConnMu.Lock()
 			l.gfdConn = conn
-			go l.gfdHeartbeatLoop()
-			go l.listenFromGFD()
+			l.gfdConnMu.Unlock()
+			go l.gfdLoop()
 			return
 		}
 		time.Sleep(1 * time.Second)
 	}
 }
 
-func (l *lfd) gfdHeartbeatLoop() {
+func (l *lfd) gfdLoop() {
 	ticker := time.NewTicker(time.Duration(l.heartbeatFrequency) * time.Second)
 	defer ticker.Stop()
+
+	// Get GFD connection
+	l.gfdConnMu.Lock()
+	conn := l.gfdConn
+	l.gfdConnMu.Unlock()
+
+	if conn == nil {
+		return
+	}
+
+	// Channel to signal when we're expecting a heartbeat response
+	heartbeatPending := false
 
 	for {
 		select {
 		case <-l.closeCh:
 			return
 		case <-ticker.C:
-			err := l.sendGFDHeartbeat()
+			// Send heartbeat
+			msg := types.Message{
+				Type:    "lfd",
+				Id:      l.id,
+				ReqNum:  l.gfdHeartbeatCount,
+				Message: "heartbeat",
+			}
+			data, err := json.Marshal(msg)
 			if err != nil {
-				// GFD connection lost
-				if l.gfdConn != nil {
-					l.gfdConn.Close()
-					l.gfdConn = nil
-				}
-				// Try to reconnect
-				go l.connectToGFD()
 				return
+			}
+
+			_, err = conn.Write(data)
+			if err != nil {
+				l.handleGFDConnectionLost()
+				return
+			}
+			fmt.Printf("\033[36m[%s] [%d] %s sending heartbeat to GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.gfdHeartbeatCount, l.id)
+			heartbeatPending = true
+			l.gfdHeartbeatCount++
+
+		default:
+			// Check for incoming messages from GFD
+			conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			buf := make([]byte, 1024)
+			n, err := conn.Read(buf)
+			if err != nil {
+				// Check if it's a timeout (which is normal)
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// Timeout is expected, continue loop
+					continue
+				}
+				// Real error - connection lost
+				l.handleGFDConnectionLost()
+				return
+			}
+
+			var msg types.Message
+			err = json.Unmarshal(buf[:n], &msg)
+			if err == nil {
+				// Check if this is a promotion message from RM (via GFD)
+				if msg.Type == "rm" && msg.Message == "Promote" {
+					fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
+					l.forwardPromotionToServer()
+					continue
+				}
+			}
+
+			// Try to parse as response (for heartbeat ACK)
+			var resp types.Response
+			err = json.Unmarshal(buf[:n], &resp)
+			if err == nil && heartbeatPending {
+				fmt.Printf("\033[36m[%s] [%d] %s received heartbeat ACK from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.gfdHeartbeatCount-1, l.id)
+				heartbeatPending = false
 			}
 		}
 	}
+}
+
+func (l *lfd) handleGFDConnectionLost() {
+	l.gfdConnMu.Lock()
+	if l.gfdConn != nil {
+		l.gfdConn.Close()
+		l.gfdConn = nil
+	}
+	l.gfdConnMu.Unlock()
+	// Try to reconnect
+	go l.connectToGFD()
 }
 
 func (l *lfd) Stop() error {
@@ -182,9 +252,11 @@ func (l *lfd) Stop() error {
 	if l.conn != nil {
 		l.conn.Close()
 	}
+	l.gfdConnMu.Lock()
 	if l.gfdConn != nil {
 		l.gfdConn.Close()
 	}
+	l.gfdConnMu.Unlock()
 	l.status = "stopped"
 	return nil
 }
@@ -237,51 +309,13 @@ func (l *lfd) Heartbeat() error {
 }
 
 // sendGFDHeartbeat sends a heartbeat to the GFD
-func (l *lfd) sendGFDHeartbeat() error {
-	if l.gfdConn == nil {
-		return fmt.Errorf("no GFD connection")
-	}
-
-	msg := types.Message{
-		Type:    "lfd",
-		Id:      l.id,
-		ReqNum:  l.gfdHeartbeatCount,
-		Message: "heartbeat",
-	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("failed to marshal GFD heartbeat: %w", err)
-	}
-
-	now := time.Now().Format("2006-01-02 15:04:05")
-
-	_, err = l.gfdConn.Write(data)
-	if err != nil {
-		return fmt.Errorf("failed to send GFD heartbeat: %w", err)
-	}
-	fmt.Printf("\033[36m[%s] [%d] %s sending heartbeat to GFD\033[0m\n", now, l.gfdHeartbeatCount, l.id)
-
-	l.gfdConn.SetReadDeadline(time.Now().Add(time.Duration(l.heartbeatFrequency) * time.Second))
-	buf := make([]byte, 1024)
-	n, err := l.gfdConn.Read(buf)
-	if err != nil {
-		return fmt.Errorf("no response from GFD: %w", err)
-	}
-
-	var resp types.Response
-	err = json.Unmarshal(buf[:n], &resp)
-	if err != nil {
-		return fmt.Errorf("invalid response from GFD: %w", err)
-	}
-
-	fmt.Printf("\033[36m[%s] [%d] %s received heartbeat ACK from GFD\033[0m\n", now, l.gfdHeartbeatCount, l.id)
-	l.gfdHeartbeatCount++
-	return nil
-}
-
 // notifyGFDAddReplica sends an "add replica" message to GFD after first successful heartbeat
 func (l *lfd) notifyGFDAddReplica() {
-	if l.gfdConn == nil {
+	l.gfdConnMu.Lock()
+	conn := l.gfdConn
+	l.gfdConnMu.Unlock()
+
+	if conn == nil {
 		return
 	}
 
@@ -298,7 +332,7 @@ func (l *lfd) notifyGFDAddReplica() {
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	_, err = l.gfdConn.Write(data)
+	_, err = conn.Write(data)
 	if err != nil {
 		return
 	}
@@ -306,9 +340,9 @@ func (l *lfd) notifyGFDAddReplica() {
 	fmt.Printf("\033[33m[%s] Sending to GFD: <%s,GFD,add replica,%s>\033[0m\n", now, l.id, l.serverID)
 
 	// Read response
-	l.gfdConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 1024)
-	n, err := l.gfdConn.Read(buf)
+	n, err := conn.Read(buf)
 	if err != nil {
 		return
 	}
@@ -319,7 +353,11 @@ func (l *lfd) notifyGFDAddReplica() {
 
 // notifyGFDDeleteReplica sends a "delete replica" message to GFD when server dies
 func (l *lfd) notifyGFDDeleteReplica() {
-	if l.gfdConn == nil {
+	l.gfdConnMu.Lock()
+	conn := l.gfdConn
+	l.gfdConnMu.Unlock()
+
+	if conn == nil {
 		return
 	}
 
@@ -336,7 +374,7 @@ func (l *lfd) notifyGFDDeleteReplica() {
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	_, err = l.gfdConn.Write(data)
+	_, err = conn.Write(data)
 	if err != nil {
 		return
 	}
@@ -344,9 +382,9 @@ func (l *lfd) notifyGFDDeleteReplica() {
 	fmt.Printf("\033[33m[%s] Sending to GFD: <%s,GFD,delete replica,%s>\033[0m\n", now, l.id, l.serverID)
 
 	// Read response
-	l.gfdConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 1024)
-	n, err := l.gfdConn.Read(buf)
+	n, err := conn.Read(buf)
 	if err != nil {
 		return
 	}
@@ -356,40 +394,6 @@ func (l *lfd) notifyGFDDeleteReplica() {
 }
 
 // listenFromGFD listens for asynchronous messages from GFD (like promotion notifications)
-func (l *lfd) listenFromGFD() {
-	for {
-		select {
-		case <-l.closeCh:
-			return
-		default:
-			if l.gfdConn == nil {
-				return
-			}
-
-			// Set a read deadline so we don't block forever
-			l.gfdConn.SetReadDeadline(time.Now().Add(5 * time.Second))
-			buf := make([]byte, 1024)
-			n, err := l.gfdConn.Read(buf)
-			if err != nil {
-				// Timeout or connection error - just continue
-				continue
-			}
-
-			var msg types.Message
-			err = json.Unmarshal(buf[:n], &msg)
-			if err != nil {
-				continue
-			}
-
-			// Handle promotion message from GFD
-			if msg.Type == "gfd" && msg.Message == "promote" {
-				fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
-				l.forwardPromotionToServer()
-			}
-		}
-	}
-}
-
 // forwardPromotionToServer forwards the promotion message to the server
 func (l *lfd) forwardPromotionToServer() {
 	if l.conn == nil {
@@ -397,9 +401,9 @@ func (l *lfd) forwardPromotionToServer() {
 	}
 
 	msg := types.Message{
-		Type:    "lfd",
+		Type:    "rm", // Changed from "lfd" to "rm" to reuse handleRMMessage
 		Id:      l.serverID,
-		Message: "promote",
+		Message: "Promote", // Changed from "promote" to "Promote" to match handleRMMessage
 		ReqNum:  0,
 	}
 

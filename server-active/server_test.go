@@ -17,7 +17,7 @@ func TestServerLifecycle(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 0, "active", false, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 0, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestServerWithThreeClients(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 0, "active", false, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 0, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestServerWithLFD(t *testing.T) {
 		"S2": "123.123.123.123:1234",
 		"S3": "123.123.123.123:1234",
 	}
-	srv, err := NewServer("S1", 0, "tcp", 9090, "active", false, 10000, peers)
+	srv, err := NewServer("S1", 0, "tcp", 9090, peers)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -262,9 +262,9 @@ func newTestCluster(t *testing.T) (Server, Server, Server) {
 		"S3": "127.0.0.1:10003",
 	}
 
-	s1, _ := NewServer("S1", 10001, "tcp", 5001, "passive", true, 2000, peers)
-	s2, _ := NewServer("S2", 10002, "tcp", 5002, "passive", false, 2000, peers)
-	s3, _ := NewServer("S3", 10003, "tcp", 5003, "passive", false, 2000, peers)
+	s1, _ := NewServer("S1", 10001, "tcp", 5001, peers)
+	s2, _ := NewServer("S2", 10002, "tcp", 5002, peers)
+	s3, _ := NewServer("S3", 10003, "tcp", 5003, peers)
 
 	go s1.Start()
 	go s2.Start()

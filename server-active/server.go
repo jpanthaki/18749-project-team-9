@@ -25,6 +25,7 @@ type server struct {
 
 	state     map[string]int
 	isReady   bool
+	isLeader  bool // Unused for active case, only here for API consistency with passive server
 	status    string
 	msgCh     chan internalMessage
 	readyCh   chan struct{}
@@ -58,6 +59,7 @@ func NewServer(id string, port int, protocol string, lfdPort int, peers map[stri
 		protocol: protocol,
 		state:    make(map[string]int),
 		isReady:  false,
+		isLeader: false, //always false for active
 		status:   "stopped",
 
 		checkpointCount: 0,
@@ -261,6 +263,9 @@ func (s *server) manager() {
 			case "replica":
 				s.handleReplicaMessage(msg)
 				msg.responseCh <- resp
+			case "rm":
+				// Active replication doesn't use leader concept, so just acknowledge
+				msg.responseCh <- resp
 			}
 
 		}
@@ -415,4 +420,8 @@ func cloneState(src map[string]int) map[string]int {
 		clone[k] = v
 	}
 	return clone
+}
+
+func (s *server) IsLeader() bool {
+	return s.isLeader
 }
