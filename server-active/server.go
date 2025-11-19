@@ -201,7 +201,8 @@ func (s *server) connectToReplicas() {
 		s.peerMu.Lock()
 		for peerId, conn := range s.peerConnections {
 			go func(peerId string, conn net.Conn) {
-				fmt.Printf("Sent recovery request to peer %s\n", peerId)
+				logMsg := fmt.Sprintf("Sent recovery request to peer %s\n", peerId)
+				s.logger.Log(logMsg, "MessageSent")
 				json.NewEncoder(conn).Encode(msg)
 			}(peerId, conn)
 		}
@@ -212,9 +213,8 @@ func (s *server) connectToReplicas() {
 	s.readyOnce.Do(func() {
 		s.isReady = true
 		close(s.readyCh)
-		fmt.Println("Server is ready")
 	})
-	fmt.Printf("No replicas detected, server is ready\n")
+	s.logger.Log("No replicas detected, server is ready\n", "LeaderPromoted")
 }
 
 func (s *server) dialReplica(peerId, addr string) {
@@ -249,7 +249,6 @@ func (s *server) manager() {
 					if msg.message.ReqNum > s.highWatermark {
 						s.highWatermark = msg.message.ReqNum
 					}
-					fmt.Printf("new watermark: %d\n", s.highWatermark)
 					s.watermarkMu.Unlock()
 					msg.responseCh <- resp
 				}
@@ -361,7 +360,8 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 				s.isReady = true
 				close(s.readyCh)
 				s.state = cloneState(chk.State)
-				fmt.Println("Server is ready")
+				s.logCheckpointReceived(msg.message, chk)
+				s.logger.Log("Valid checkpoint received, server is ready\n", "LeaderPromoted")
 			})
 		}
 	}
