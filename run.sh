@@ -25,14 +25,13 @@ start_server_active() {
         -lfdPort $lfdport -s1Addr $2 -s2Addr $3 -s3Addr $4
 }
 
-# args <id> <isLeader> <s1Addr> <s2Addr> <s3Addr>
+# args <id> <s1Addr> <s2Addr> <s3Addr>
 start_server_passive() {
     local serverid="S$1"
     local lfdport=$((9000 + $1))
     local serverport=$((8080 + $1))
     go run server-passive/srunner/srunner.go -id $serverid -port $serverport \
-        -lfdPort $lfdport -s1Addr $3 -s2Addr $4 -s3Addr $5 \
-        -isLeader $2
+        -lfdPort $lfdport -s1Addr $2 -s2Addr $3 -s3Addr $4
 }
 
 # args <id> <s1> <s2> <s3>
