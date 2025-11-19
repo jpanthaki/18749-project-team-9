@@ -33,7 +33,7 @@ func (c *client) connectToServer(id, addr string) {
 		c.conns[id] = conn
 		c.connMutex.Unlock()
 
-		fmt.Printf("connected to %s\n", id)
+		// fmt.Printf("connected to %s\n", id)
 		return
 	}
 }
