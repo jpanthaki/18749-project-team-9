@@ -95,25 +95,39 @@ func (r *rm) manager() {
 			switch msg.Message {
 			case "add":
 				r.membership[msg.Id] = true
-				r.memberCount++
 				// elect primary if this is the first member
+				r.logger.Log((fmt.Sprintf("current primary: %s", r.primary)), "CurrentPrimary")
 				if r.primary == "" {
+					r.logger.Log((fmt.Sprintf("Found empty primary, electing new primary", r.primary)), "CurrentPrimary")
 					r.electPrimary()
 				}
+				r.resetMemberCount()
 				r.printMembership("Added", msg.Id)
 			case "remove":
 				r.membership[msg.Id] = false
-				r.memberCount--
 				// Only re-elect if the primary died
+				r.logger.Log((fmt.Sprintf("a server %s died, current primary: %s", msg.Id, r.primary)), "CurrentPrimary")
 				if r.primary == msg.Id {
+					r.logger.Log((fmt.Sprintf("Primary %s died, electing new primary", r.primary)), "CurrentPrimary")
 					r.electPrimary()
 				}
+				r.resetMemberCount()
 				r.printMembership("Removed", msg.Id)
 			}
 		case <-r.closeCh:
 			return
 		}
 	}
+}
+
+func (r *rm) resetMemberCount() {
+	count := 0
+	for _, alive := range r.membership {
+		if alive {
+			count++
+		}
+	}
+	r.memberCount = count
 }
 
 func (r *rm) listenToGFD() {
