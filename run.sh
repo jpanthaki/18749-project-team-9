@@ -50,6 +50,12 @@ start_gfd() {
     go run gfd/gfdrunner/gfdrunner.go
 }
 
+# args <gfdaddr>
+start_rm() {
+    local gfdaddr=$1
+    go run rm/rmrunner/rmrunner.go -gfdaddr $gfdaddr
+}
+
 if [ $1 = "lfd" ]; then
     if [ $# -ne 3 ]; then
         echo "incorect number of args: $# for LFD"
@@ -91,6 +97,19 @@ elif [ $1 = "gfd" ]; then
     fi
     echo "starting gfd.."
     start_gfd
+    exit 0
+elif [ $1 = "rm" ]; then
+    if [ $# -eq 1 ]; then
+        echo "starting rm with default gfdaddr (localhost:9090).."
+        start_rm "localhost:9090"
+    elif [ $# -eq 2 ]; then
+        echo "starting rm with gfdaddr $2.."
+        start_rm $2
+    else
+        echo "incorect number of args: $# for rm"
+        echo "rm args: [gfdaddr] (optional, defaults to localhost:9090)"
+        exit -1
+    fi
     exit 0
 fi
 echo "invalid type {lfd, server, client, gfd}"

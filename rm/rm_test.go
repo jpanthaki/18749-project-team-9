@@ -20,7 +20,7 @@ func TestRMLifecycle(t *testing.T) {
 	defer g.Stop()
 
 	// Start RM
-	r, err := NewRM(17000, "tcp", 18000)
+	r, err := NewRM(17000, "tcp", "localhost:18000")
 	if err != nil {
 		t.Fatalf("Failed to create RM: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestRMPrimaryElection(t *testing.T) {
 	defer g.Stop()
 
 	// Start RM
-	r, err := NewRM(17001, "tcp", 18001)
+	r, err := NewRM(17001, "tcp", "localhost:18001")
 	if err != nil {
 		t.Fatalf("Failed to create RM: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestRMConnectionToGFD(t *testing.T) {
 	defer g.Stop()
 
 	// Start RM
-	r, err := NewRM(17002, "tcp", 18002)
+	r, err := NewRM(17002, "tcp", "localhost:18002")
 	if err != nil {
 		t.Fatalf("Failed to create RM: %v", err)
 	}

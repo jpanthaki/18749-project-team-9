@@ -20,7 +20,7 @@ type rm struct {
 	port     int
 	protocol string
 	gfdConn  net.Conn
-	gfdPort  int
+	gfdAddr  string // Changed from gfdPort to gfdAddr to support full address
 
 	membership  map[string]bool
 	memberCount int
@@ -33,11 +33,11 @@ type rm struct {
 }
 
 // Basic initialization
-func NewRM(port int, protocol string, gfdPort int) (RM, error) {
+func NewRM(port int, protocol string, gfdAddr string) (RM, error) {
 	r := &rm{
 		port:        port,
 		protocol:    protocol,
-		gfdPort:     gfdPort,
+		gfdAddr:     gfdAddr,
 		membership:  make(map[string]bool),
 		memberCount: 0,
 		msgCh:       make(chan types.Message),
@@ -49,9 +49,9 @@ func NewRM(port int, protocol string, gfdPort int) (RM, error) {
 
 func (r *rm) Start() error {
 	// Connect to GFD
-	conn, err := net.Dial(r.protocol, fmt.Sprintf(":%d", r.gfdPort))
+	conn, err := net.Dial(r.protocol, r.gfdAddr)
 	if err != nil {
-		return fmt.Errorf("failed to connect to GFD on port %d: %w", r.gfdPort, err)
+		return fmt.Errorf("failed to connect to GFD at %s: %w", r.gfdAddr, err)
 	}
 	r.gfdConn = conn
 
@@ -67,7 +67,7 @@ func (r *rm) Start() error {
 	go r.manager()
 	go r.listenToGFD()
 
-	logMsg := fmt.Sprintf("RM started on port %d, connected to GFD:%d", r.port, r.gfdPort)
+	logMsg := fmt.Sprintf("RM started on port %d, connected to GFD:%s", r.port, r.gfdAddr)
 	r.logger.Log(logMsg, "RMStarted")
 	return nil
 }

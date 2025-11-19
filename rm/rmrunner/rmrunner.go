@@ -12,10 +12,10 @@ import (
 func main() {
 	port := flag.Int("port", 7000, "Port for RM")
 	protocol := flag.String("protocol", "tcp", "Protocol for RM")
-	gfdPort := flag.Int("gfdport", 8000, "Port to connect to GFD")
+	gfdAddr := flag.String("gfdaddr", "localhost:8000", "Address to connect to GFD (host:port)")
 	flag.Parse()
 
-	r, err := rm.NewRM(*port, *protocol, *gfdPort)
+	r, err := rm.NewRM(*port, *protocol, *gfdAddr)
 	if err != nil {
 		fmt.Printf("Failed to create RM: %v\n", err)
 		os.Exit(1)
