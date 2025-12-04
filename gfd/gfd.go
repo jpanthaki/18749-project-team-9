@@ -18,14 +18,14 @@ type gfd struct {
 	membership  map[string]bool
 	memberCount int
 
-	lfdConns         map[string]net.Conn // maps serverID to LFD connection
-	connToServerId   map[net.Conn]string // inversion of lfdConns map
-	connections      map[net.Conn]struct{}
-	rmConn           net.Conn // Connection to RM
-	sendPromotion    bool     // Send promotion flag
-	sendRelaunch     bool     // Send relaunch flag
-	sendRelaunchId   string   // Server ID to relaunch
-	promotionPayload json.RawMessage
+	lfdConns        map[string]net.Conn // maps serverID to LFD connection
+	connToServerId  map[net.Conn]string // inversion of lfdConns map
+	connections     map[net.Conn]struct{}
+	rmConn          net.Conn // Connection to RM
+	sendPromotion   bool     // Send promotion flag
+	sendPromotionId string   // Server ID to promote
+	sendRelaunch    bool     // Send relaunch flag
+	sendRelaunchId  string   // Server ID to relaunch
 
 	lfdConnMu       sync.Mutex
 	sendPromotionMu sync.Mutex // Protects sendPromotion access
@@ -157,24 +157,22 @@ func (g *gfd) manager() {
 				logMsg = fmt.Sprintf("[%d] GFD receives heartbeat from %s", msg.message.ReqNum, msg.id)
 				g.logger.Log(logMsg, "LFDHeartbeatReceived")
 				g.sendPromotionMu.Lock()
-				var payload json.RawMessage
 				var message string
-				if g.sendPromotion {
-					// Send promotion message
-					payload = g.promotionPayload
+				message = "Alive"
+				if g.sendPromotion && g.sendPromotionId[len(g.sendPromotionId)-1] == msg.id[len(msg.id)-1] {
+					message = "Promote"
 					g.sendPromotion = false
-					g.promotionPayload = nil
-				} else if g.sendRelaunch && g.sendRelaunchId == msg.id {
+					g.sendPromotionId = ""
+					g.logger.Log(fmt.Sprintf("GFD sending promotion to %s", msg.id), "PromotionSent")
+				} else if g.sendRelaunch && g.sendRelaunchId[len(g.sendRelaunchId)-1] == msg.id[len(msg.id)-1] {
 					message = "Relaunch"
-					g.sendRelaunch = false
 					g.sendRelaunchId = ""
-				} else {
-					message = "Alive"
-					payload = nil
+					g.sendRelaunch = false
+					g.logger.Log(fmt.Sprintf("GFD sending relaunch to %s", msg.id), "RelaunchSent")
 				}
 				g.sendPromotionMu.Unlock()
 				var responseMessage types.Message
-				responseMessage = types.Message{Type: "gfd", Id: msg.id, ReqNum: msg.message.ReqNum, Message: message, Payload: payload}
+				responseMessage = types.Message{Type: "gfd", Id: msg.id, ReqNum: msg.message.ReqNum, Message: message}
 				msg.responseCh <- responseMessage
 				logMsg = fmt.Sprintf("[%d] GFD sending heartbeat ACK to %s", msg.message.ReqNum, msg.id)
 				g.logger.Log(logMsg, "LFDHeartbeatSent")
@@ -321,7 +319,7 @@ func (g *gfd) handleConnection(conn net.Conn) {
 				//g.forwardPromotionToLFD(rmMsg.Id)
 				g.sendPromotionMu.Lock()
 				g.sendPromotion = true
-				g.promotionPayload, _ = json.Marshal(&rmMsg)
+				g.sendPromotionId = rmMsg.Id
 				g.sendPromotionMu.Unlock()
 				logMsg := fmt.Sprintf("Scheduled promotion for server %s", rmMsg.Id)
 				g.logger.Log(logMsg, "PromotionScheduled")
