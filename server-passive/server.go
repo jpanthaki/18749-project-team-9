@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -319,6 +320,7 @@ func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) 
 func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 	// Default heartbeat response
 	if msg.message.Payload != nil && len(msg.message.Payload) > 0 {
+		fmt.Println("Got da payload")
 		var rmMsg types.Message
 		json.Unmarshal(msg.message.Payload, &rmMsg)
 		s.handleRMMessage(rmMsg)
@@ -343,7 +345,7 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 }
 
 func (s *server) handleRMMessage(msg types.Message) {
-	switch msg.Message {
+	switch strings.ToLower(msg.Message) {
 	case "Promote":
 		s.isLeader = true
 		s.logLeaderPromotion()

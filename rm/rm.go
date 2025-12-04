@@ -120,11 +120,36 @@ func (r *rm) manager() {
 				}
 				r.resetMemberCount()
 				r.printMembership("Removed", msg.Id)
+				r.sendRelaunchMessage(msg.Id)
 			}
 		case <-r.closeCh:
 			return
 		}
 	}
+}
+
+func (r *rm) sendRelaunchMessage(id string) {
+	msg := types.Message{
+		Type:    "rm",
+		Id:      id,
+		Message: "relaunch",
+		ReqNum:  0,
+	}
+
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	_, err = r.gfdConn.Write(msgBytes)
+	if err != nil {
+		// GFD connection los
+		r.gfdConn = nil
+		return
+	}
+
+	logMsg := fmt.Sprintf("Notified GFD to relaunch replica: %s", id)
+	r.logger.Log(logMsg, "RelaunchNotification")
 }
 
 func (r *rm) resetMemberCount() {
