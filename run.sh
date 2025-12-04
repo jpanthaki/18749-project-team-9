@@ -23,7 +23,7 @@ start_server_active() {
     local lfdport=$((9000 + $1))
     local serverport=$((8080 + $1))
     go run server-active/srunner/srunner.go -id $serverid -port $serverport \
-        -lfdPort $lfdport -s1Addr $2 -s2Addr $3 -s3Addr $4
+        -lfdPort $lfdport #-s1Addr $2 -s2Addr $3 -s3Addr $4
 }
 
 # args <id> <s1Addr> <s2Addr> <s3Addr>
@@ -32,7 +32,7 @@ start_server_passive() {
     local lfdport=$((9000 + $1))
     local serverport=$((8080 + $1))
     go run server-passive/srunner/srunner.go -id $serverid -port $serverport \
-        -lfdPort $lfdport -s1Addr $2 -s2Addr $3 -s3Addr $4
+        -lfdPort $lfdport # -s1Addr $2 -s2Addr $3 -s3Addr $4
 }
 
 # args <id> <s1> <s2> <s3>
@@ -69,10 +69,10 @@ if [ $1 = "lfd" ]; then
 elif [ $1 = "server" ]; then
     if [ $2 = "active" ]; then
         echo "starting active..."
-        start_server_active $3 $4 $5 $6
+        start_server_active $3 #$4 $5 $6
     elif [ $2 = "passive" ]; then
         echo "starting passive..."
-        start_server_passive $3 $4 $5 $6 $7
+        start_server_passive $3 # $4 $5 $6 $7
     else
         echo "incorect server type"
         exit -1

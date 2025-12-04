@@ -4,6 +4,7 @@ import (
 	"18749-team9/helpers"
 	server "18749-team9/server-passive"
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -16,17 +17,25 @@ func main() {
 	lfdPort := flag.Int("lfdPort", 9000, "port of the local failure detector (0 if none)")
 	protocol := flag.String("protocol", "tcp", "protocol of the server ")
 	isLeader := flag.Bool("isLeader", false, "is the server the leader?")
-	s1Addr := flag.String("s1Addr", "127.0.0.1:8081", "address of the s1 server")
-	s2Addr := flag.String("s2Addr", "127.0.0.1:8082", "address of the s2 server")
-	s3Addr := flag.String("s3Addr", "127.0.0.1:8083", "address of the s3 server")
+	// s1Addr := flag.String("s1Addr", "127.0.0.1:8081", "address of the s1 server")
+	// s2Addr := flag.String("s2Addr", "127.0.0.1:8082", "address of the s2 server")
+	// s3Addr := flag.String("s3Addr", "127.0.0.1:8083", "address of the s3 server")
 	checkpointFreq := flag.Int("checkpointFreq", 4000, "passive replication checkpoint frequency")
 	flag.Parse()
 
-	peerMap := map[string]string{
-		"S1": *s1Addr,
-		"S2": *s2Addr,
-		"S3": *s3Addr,
-	}
+	// peerMap := map[string]string{
+	// 	"S1": *s1Addr,
+	// 	"S2": *s2Addr,
+	// 	"S3": *s3Addr,
+	// }
+
+	cwd, _ := os.Getwd()
+
+	data, _ := os.ReadFile(fmt.Sprintf("%s/serverAddrs.json", cwd))
+
+	peerMap := make(map[string]string)
+
+	json.Unmarshal(data, &peerMap)
 
 	fmt.Printf("Starting server at address %s:%d with ID: %s, Protocol: %s\n", helpers.GetLocalIP(), *port, *id, *protocol)
 
