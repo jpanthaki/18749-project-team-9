@@ -346,7 +346,7 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 
 func (s *server) handleRMMessage(msg types.Message) {
 	switch strings.ToLower(msg.Message) {
-	case "Promote":
+	case "promote":
 		s.isLeader = true
 		s.logLeaderPromotion()
 		go s.connectToReplicas()
