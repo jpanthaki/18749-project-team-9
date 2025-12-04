@@ -26,11 +26,15 @@ type lfd struct {
 	status             string
 	conn               net.Conn
 	closeCh            chan struct{}
+	writeCh            chan types.Message
+	sendPromotion      bool // Send promotion flag
+	promotionPayload   json.RawMessage
 
 	gfdPort            int
 	gfdAddr            string
 	gfdConn            net.Conn
 	gfdConnMu          sync.Mutex // Protects gfdConn access
+	sendPromotionMu    sync.Mutex // Protects sendPromotion access
 	gfdHeartbeatCount  int
 	serverRegistered   bool // Track if server has been registered with GFD
 	firstHeartbeatDone bool // Track if first heartbeat to server succeeded
@@ -204,7 +208,6 @@ func (l *lfd) gfdLoop() {
 			buf := make([]byte, 1024)
 			n, err := conn.Read(buf)
 			if err != nil {
-				// Check if it's a timeout (which is normal)
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					// Timeout is expected, continue loop
 					continue
@@ -220,7 +223,11 @@ func (l *lfd) gfdLoop() {
 				// Check if this is a promotion message from RM (via GFD)
 				if msg.Type == "rm" && msg.Message == "Promote" {
 					fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
-					l.forwardPromotionToServer()
+					l.sendPromotionMu.Lock()
+					l.sendPromotion = true
+					l.promotionPayload, _ = json.Marshal(&msg)
+					l.sendPromotionMu.Unlock()
+					//l.forwardPromotionToServer()
 					continue
 				}
 			}
@@ -271,12 +278,25 @@ func (l *lfd) Heartbeat() error {
 		return fmt.Errorf("no server connection")
 	}
 
+	var payload json.RawMessage
+	l.sendPromotionMu.Lock()
+	if l.sendPromotion {
+		payload = l.promotionPayload
+		l.promotionPayload = nil
+		l.sendPromotion = false
+	} else {
+		payload = nil
+	}
+	l.sendPromotionMu.Unlock()
+
 	msg := types.Message{
 		Type:    "lfd",
 		Id:      l.id,
 		ReqNum:  l.heartbeatCount,
 		Message: "heartbeat",
+		Payload: payload,
 	}
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal heartbeat: %w", err)

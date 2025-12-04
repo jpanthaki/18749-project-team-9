@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 type RM interface {
@@ -49,16 +50,22 @@ func NewRM(port int, protocol string, gfdAddr string) (RM, error) {
 
 func (r *rm) Start() error {
 	// Connect to GFD
-	conn, err := net.Dial(r.protocol, r.gfdAddr)
-	if err != nil {
-		return fmt.Errorf("failed to connect to GFD at %s: %w", r.gfdAddr, err)
+	for {
+		conn, err := net.Dial(r.protocol, r.gfdAddr)
+		if err == nil {
+			fmt.Printf("Connected to GFD at %s\n", r.gfdAddr)
+			r.gfdConn = conn
+			break
+		}
+		time.Sleep(1 * time.Second)
 	}
-	r.gfdConn = conn
+
+	r.primary = ""
 
 	// Send message to register with GFD
 	regMsg := types.Message{Type: "rm", Id: "1", Message: "register", ReqNum: 0}
 	msgBytes, _ := json.Marshal(regMsg)
-	_, err = r.gfdConn.Write(msgBytes)
+	_, err := r.gfdConn.Write(msgBytes)
 	if err != nil {
 		return fmt.Errorf("failed to register with GFD: %w", err)
 	}
@@ -98,7 +105,7 @@ func (r *rm) manager() {
 				// elect primary if this is the first member
 				r.logger.Log((fmt.Sprintf("current primary: %s", r.primary)), "CurrentPrimary")
 				if r.primary == "" {
-					r.logger.Log((fmt.Sprintf("Found empty primary, electing new primary", r.primary)), "CurrentPrimary")
+					r.logger.Log(("Found empty primary, electing new primary"), "CurrentPrimary")
 					r.electPrimary()
 				}
 				r.resetMemberCount()

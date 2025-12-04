@@ -121,6 +121,7 @@ func (g *gfd) manager() {
 				logMsg = fmt.Sprintf("Adding server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
 				g.logger.Log(logMsg, "AddingServer")
 				g.notifyRM("add", msg.id)
+				// g.updateMemberCount()
 			case "remove":
 				g.membership[msg.id] = false
 				g.memberCount--
@@ -139,6 +140,7 @@ func (g *gfd) manager() {
 				g.logger.Log(logMsg, "RemovingServer")
 				// Notify RM of membership change
 				g.notifyRM("remove", msg.id)
+				// g.updateMemberCount()
 			case "heartbeat":
 				g.lfdConnMu.Lock()
 				if _, ok := g.lfdConns[msg.id]; !ok {
@@ -167,7 +169,7 @@ func (g *gfd) notifyRM(action string, serverId string) {
 		Type:    "gfd",
 		Id:      serverId,
 		Message: action,
-		ReqNum:  g.memberCount,
+		ReqNum:  0,
 	}
 
 	msgBytes, err := json.Marshal(msg)
@@ -190,6 +192,7 @@ func (g *gfd) notifyRM(action string, serverId string) {
 func (g *gfd) forwardPromotionToLFD(serverID string) {
 	g.lfdConnMu.Lock()
 	conn, exists := g.lfdConns[serverID]
+	g.logger.Log(fmt.Sprintf("Forwarding promotion to LFD for server %s and conn %v", serverID, conn), "PromotionForwardAttempt")
 	g.lfdConnMu.Unlock()
 
 	if !exists {
@@ -267,7 +270,7 @@ func (g *gfd) handleConnection(conn net.Conn) {
 			Type:    "gfd",
 			Id:      "",
 			Message: "initial",
-			ReqNum:  g.memberCount,
+			ReqNum:  0,
 		}
 		initialBytes, _ := json.Marshal(initialMsg)
 		conn.Write(initialBytes)
@@ -370,3 +373,13 @@ func (g *gfd) handleConnection(conn net.Conn) {
 		}
 	}
 }
+
+// func (g *gfd) updateMemberCount() {
+// 	memberCount := 0
+// 	for _, alive := range g.membership {
+// 		if alive {
+// 			memberCount++
+// 		}
+// 	}
+// 	g.memberCount = memberCount
+// }

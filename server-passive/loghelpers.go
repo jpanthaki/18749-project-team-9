@@ -28,6 +28,8 @@ func (s *server) logAfter(msg types.Message) {
 func (s *server) logHeartbeatReceived(msg types.Message) {
 	logMsg := fmt.Sprintf("<%d> Received heartbeat from %s", msg.ReqNum, msg.Id)
 	s.logger.Log(logMsg, "HeartbeatReceived")
+	logPayload := fmt.Sprintf("<%d> Heartbeat payload from %s: %s", msg.ReqNum, msg.Id, string(msg.Payload))
+	s.logger.Log(logPayload, "HeartbeatPayload")
 }
 
 func (s *server) logHeartbeatSent(resp types.Response) {

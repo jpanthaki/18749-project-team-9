@@ -12,7 +12,7 @@ import (
 func main() {
 	port := flag.Int("port", 7000, "Port for RM")
 	protocol := flag.String("protocol", "tcp", "Protocol for RM")
-	gfdAddr := flag.String("gfdaddr", "localhost:8000", "Address to connect to GFD (host:port)")
+	gfdAddr := flag.String("gfdaddr", "localhost:9090", "Address to connect to GFD (host:port)")
 	flag.Parse()
 
 	r, err := rm.NewRM(*port, *protocol, *gfdAddr)
