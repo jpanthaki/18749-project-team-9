@@ -17,8 +17,6 @@ func Relaunch(method string, id string) {
 
 	json.Unmarshal(data, &serverAddrs)
 
-	fmt.Println(serverAddrs)
-
 	command := fmt.Sprintf(`./run.sh server %s %s %s %s %s`, method, id[1:], serverAddrs["S1"], serverAddrs["S2"], serverAddrs["S3"])
 
 	escaped := strings.ReplaceAll(command, `"`, `/"`)

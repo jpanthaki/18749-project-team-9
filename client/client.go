@@ -18,7 +18,6 @@ type client struct {
 	serverAddrs map[string]string
 	connMutex   sync.Mutex
 	conns       map[string]net.Conn
-	primary     string
 
 	reqNum int
 
@@ -76,6 +75,7 @@ func (c *client) sendToAll(msg types.Message) (types.Response, error) {
 	for id, conn := range snapshot {
 		wg.Add(1)
 		go func(id string, conn net.Conn) {
+			defer wg.Done()
 			var logMsg string
 			enc := json.NewEncoder(conn)
 			if err := enc.Encode(msg); err != nil {
@@ -99,7 +99,7 @@ func (c *client) sendToAll(msg types.Message) (types.Response, error) {
 			}
 
 			responses <- result{resp: resp, err: nil}
-			wg.Done()
+			// wg.Done()
 		}(id, conn)
 	}
 
@@ -131,24 +131,33 @@ func (c *client) sendToAll(msg types.Message) (types.Response, error) {
 
 func main() {
 	id := flag.String("id", "C1", "client id")
-	s1Addr := flag.String("s1", "127.0.0.1:8081", "s1 addr")
-	s2Addr := flag.String("s2", "127.0.0.1:8082", "s2 addr")
-	s3Addr := flag.String("s3", "127.0.0.1:8083", "s3 addr")
+	// s1Addr := flag.String("s1", "127.0.0.1:8081", "s1 addr")
+	// s2Addr := flag.String("s2", "127.0.0.1:8082", "s2 addr")
+	// s3Addr := flag.String("s3", "127.0.0.1:8083", "s3 addr")
 	auto := flag.Bool("auto", false, "send messages automatically")
 	flag.Parse()
 
-	serverAddrs := map[string]string{
-		"S1": *s1Addr,
-		"S2": *s2Addr,
-		"S3": *s3Addr,
-	}
+	// serverAddrs := map[string]string{
+	// 	"S1": *s1Addr,
+	// 	"S2": *s2Addr,
+	// 	"S3": *s3Addr,
+	// }
+
+	cwd, _ := os.Getwd()
+
+	data, _ := os.ReadFile(fmt.Sprintf("%s/serverAddrs.json", cwd))
+
+	serverAddrs := make(map[string]string)
+
+	json.Unmarshal(data, &serverAddrs)
+
+	fmt.Println(serverAddrs)
 
 	c := &client{
 		id:          *id,
 		serverAddrs: serverAddrs,
 		connMutex:   sync.Mutex{},
 		conns:       make(map[string]net.Conn),
-		primary:     "S1",
 		reqNum:      0,
 		logger:      log.New("Client"),
 	}

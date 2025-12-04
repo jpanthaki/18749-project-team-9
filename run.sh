@@ -38,11 +38,11 @@ start_server_passive() {
 # args <id> <s1> <s2> <s3>
 start_client() {
     local clientid="C$1"
-    local s1="$2"
-    local s2="$3"
-    local s3="$4"
+    # local s1="$2"
+    # local s2="$3"
+    # local s3="$4"
     local think="0.5s"
-    go run client/client.go -s1 $s1 -s2 $s2 -s3 $s3 -id $clientid -auto
+    go run client/client.go -id $clientid -auto
 }
 
 # args none
@@ -80,13 +80,13 @@ elif [ $1 = "server" ]; then
     exit 0
 
 elif [ $1 = "client" ]; then
-    if [ $# -ne 5 ]; then
+    if [ $# -ne 2 ]; then
         echo "incorect number of args: $# for client"
         echo "client args: <id> <s1> <s2> <s3>"
         exit -1
     fi
     echo "starting client $2.."
-    start_client $2 $3 $4 $5
+    start_client $2 # $3 $4 $5
     exit 0
 
 elif [ $1 = "gfd" ]; then
