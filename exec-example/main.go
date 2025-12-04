@@ -29,11 +29,5 @@ func main() {
 	// }
 	// log.Printf("osascript output: %s\n", out)
 
-	serverAddrs := map[string]string{
-		"S1": "127.0.0.1:8081",
-		"S2": "172.26.80.200:8082",
-		"S3": "127.0.0.1:8083",
-	}
-
-	helpers.Relaunch("active", 1, serverAddrs)
+	helpers.Relaunch("active", "S1")
 }

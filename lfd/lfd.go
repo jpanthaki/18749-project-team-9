@@ -1,6 +1,7 @@
 package lfd
 
 import (
+	"18749-team9/helpers"
 	"18749-team9/types"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ type Lfd interface {
 type lfd struct {
 	id                 string
 	serverID           string // ID of the server replica being monitored
+	method             string
 	heartbeatCount     int
 	heartbeatFrequency int
 	port               int
@@ -40,10 +42,11 @@ type lfd struct {
 	firstHeartbeatDone bool // Track if first heartbeat to server succeeded
 }
 
-func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protocol string, gfdPort int, gfdAddr string) (Lfd, error) {
+func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protocol string, gfdPort int, gfdAddr string, method string) (Lfd, error) {
 	l := &lfd{
 		id:                 id,
 		serverID:           serverID,
+		method:             method,
 		port:               port,
 		protocol:           protocol,
 		status:             "stopped",
@@ -224,11 +227,20 @@ func (l *lfd) gfdLoop() {
 			if err == nil {
 				// Check if this is a promotion message from RM (via GFD)
 				if msg.Payload != nil {
-					fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
-					l.sendPromotionMu.Lock()
-					l.sendPromotion = true
-					l.promotionPayload = msg.Payload
-					l.sendPromotionMu.Unlock()
+					var rmMsg types.Message
+					json.Unmarshal(msg.Payload, rmMsg)
+					switch rmMsg.Message {
+					case "promote":
+						fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
+						l.sendPromotionMu.Lock()
+						l.sendPromotion = true
+						l.promotionPayload = msg.Payload
+						l.sendPromotionMu.Unlock()
+					case "relaunch":
+						fmt.Printf("\033[32m[%s] %s received relaunch from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
+						helpers.Relaunch(l.method, l.serverID)
+					}
+
 					//l.forwardPromotionToServer()
 				}
 				fmt.Printf("\033[36m[%s] [%d] %s received heartbeat ACK from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.gfdHeartbeatCount-1, l.id)

@@ -5,15 +5,16 @@
 echo "$0 usage: <type> <args>"
 
 # starts lfd
-# args <id> <gfdaddr>
+# args <id> <gfdaddr> <method>
 start_lfd() {
     local lfdid="LFD$1"
     local serverid="S$1"
     local lfdport=$((9000 + $1))
     local gfdaddr="$2"
     local serverport=$((8080 + $1))
+    local method="$3"
     go run lfd/lfdrunner/lfdrunner.go -id $lfdid -serverid $serverid \
-    -port $lfdport -gfdaddr $gfdaddr
+    -port $lfdport -gfdaddr $gfdaddr -method $method
 }
 
 # args <id> <s1Addr> <s2Addr> <s3Addr>
@@ -56,13 +57,13 @@ start_rm() {
 }
 
 if [ $1 = "lfd" ]; then
-    if [ $# -ne 3 ]; then
+    if [ $# -ne 4 ]; then
         echo "incorect number of args: $# for LFD"
-        echo "lfd args: <id> <gfdaddr>"
+        echo "lfd args: <id> <gfdaddr> <method>"
         exit -1
     fi
     echo "starting lfd $2.."
-    start_lfd $2 $3 
+    start_lfd $2 $3 $4
     exit 0
 
 elif [ $1 = "server" ]; then

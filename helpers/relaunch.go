@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,11 +9,19 @@ import (
 	"strings"
 )
 
-func Relaunch(method string, id int, serverAddrs map[string]string) {
+func Relaunch(method string, id string) {
 	cwd, _ := os.Getwd()
 	parent := filepath.Dir(cwd)
 
-	command := fmt.Sprintf(`./run.sh server %s %d %s %s %s`, method, id, serverAddrs["S1"], serverAddrs["S2"], serverAddrs["S3"])
+	data, _ := os.ReadFile("../serverAddrs.json")
+
+	serverAddrs := make(map[string]string)
+
+	json.Unmarshal(data, &serverAddrs)
+
+	fmt.Println(serverAddrs)
+
+	command := fmt.Sprintf(`./run.sh server %s %s %s %s %s`, method, id[1:], serverAddrs["S1"], serverAddrs["S2"], serverAddrs["S3"])
 
 	escaped := strings.ReplaceAll(command, `"`, `/"`)
 
