@@ -186,7 +186,7 @@ func (r *rm) notifyGFDPromotion(primaryId string) {
 	msg := types.Message{
 		Type:    "rm",
 		Id:      primaryId,
-		Message: "promote",
+		Message: "Promote",
 		ReqNum:  0,
 	}
 
