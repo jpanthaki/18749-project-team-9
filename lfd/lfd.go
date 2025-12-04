@@ -226,7 +226,7 @@ func (l *lfd) gfdLoop() {
 			var msg types.Message
 			err = json.Unmarshal(buf[:n], &msg)
 			if err == nil {
-				fmt.Println(msg)
+				// fmt.Println(msg)
 				// Check if this is a promotion message from RM (via GFD)
 				switch strings.ToLower(msg.Message) {
 				case "promote":

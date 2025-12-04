@@ -319,7 +319,7 @@ func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) 
 
 func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 	// Default heartbeat response
-	fmt.Println(msg.message.Message)
+	// fmt.Println(msg.message.Message)
 	if strings.ToLower(msg.message.Message) == "promote" {
 		s.handleRMMessage(msg.message)
 	}
@@ -343,7 +343,7 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 }
 
 func (s *server) handleRMMessage(msg types.Message) {
-	fmt.Println(msg)
+	// fmt.Println(msg)
 	switch strings.ToLower(msg.Message) {
 	case "promote":
 		s.isLeader = true
