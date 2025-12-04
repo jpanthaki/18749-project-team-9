@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -343,8 +344,8 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 }
 
 func (s *server) handleRMMessage(msg types.Message) {
-	switch msg.Message {
-	case "Promote":
+	switch strings.ToLower(msg.Message) {
+	case "promote":
 		s.isLeader = true
 		s.logLeaderPromotion()
 		go s.connectToReplicas()
