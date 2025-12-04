@@ -23,6 +23,8 @@ type gfd struct {
 	connections      map[net.Conn]struct{}
 	rmConn           net.Conn // Connection to RM
 	sendPromotion    bool     // Send promotion flag
+	sendRelaunch     bool     // Send relaunch flag
+	sendRelaunchId   string   // Server ID to relaunch
 	promotionPayload json.RawMessage
 
 	lfdConnMu       sync.Mutex
@@ -103,7 +105,7 @@ func (g *gfd) manager() {
 			switch msg.message.Message {
 			case "add":
 				g.membership[msg.id] = true
-				g.memberCount++
+				//g.memberCount++
 
 				// Store the connection-to-serverID mapping AND the LFD connection immediately
 				g.lfdConnMu.Lock()
@@ -122,13 +124,13 @@ func (g *gfd) manager() {
 				}(g.membership), ",")
 				resp = types.Message{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Message: "Added"}
 				msg.responseCh <- resp
-				logMsg = fmt.Sprintf("Adding server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
-				g.logger.Log(logMsg, "AddingServer")
 				g.notifyRM("add", msg.id)
-				// g.updateMemberCount()
+				g.updateMemberCount()
+				logMsg := fmt.Sprintf("Adding server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
+				g.logger.Log(logMsg, "AddingServer")
 			case "remove":
 				g.membership[msg.id] = false
-				g.memberCount--
+				//g.memberCount--
 				livingServers := strings.Join(func(m map[string]bool) []string {
 					var s []string
 					for k, v := range m {
@@ -140,11 +142,12 @@ func (g *gfd) manager() {
 				}(g.membership), ",")
 				resp = types.Message{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Message: "Removed"}
 				msg.responseCh <- resp
-				logMsg = fmt.Sprintf("Removing server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
-				g.logger.Log(logMsg, "RemovingServer")
+
 				// Notify RM of membership change
 				g.notifyRM("remove", msg.id)
-				// g.updateMemberCount()
+				g.updateMemberCount()
+				logMsg := fmt.Sprintf("Removing server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
+				g.logger.Log(logMsg, "RemovingServer")
 			case "heartbeat":
 				g.lfdConnMu.Lock()
 				if _, ok := g.lfdConns[msg.id]; !ok {
@@ -155,18 +158,24 @@ func (g *gfd) manager() {
 				g.logger.Log(logMsg, "LFDHeartbeatReceived")
 				g.sendPromotionMu.Lock()
 				var payload json.RawMessage
+				var message string
 				if g.sendPromotion {
 					// Send promotion message
 					payload = g.promotionPayload
 					g.sendPromotion = false
 					g.promotionPayload = nil
+				} else if g.sendRelaunch && g.sendRelaunchId == msg.id {
+					message = "Relaunch"
+					g.sendRelaunch = false
+					g.sendRelaunchId = ""
 				} else {
+					message = "Alive"
 					payload = nil
 				}
 				g.sendPromotionMu.Unlock()
-				var message types.Message
-				message = types.Message{Type: "gfd", Id: msg.id, ReqNum: msg.message.ReqNum, Message: "Alive", Payload: payload}
-				msg.responseCh <- message
+				var responseMessage types.Message
+				responseMessage = types.Message{Type: "gfd", Id: msg.id, ReqNum: msg.message.ReqNum, Message: message, Payload: payload}
+				msg.responseCh <- responseMessage
 				logMsg = fmt.Sprintf("[%d] GFD sending heartbeat ACK to %s", msg.message.ReqNum, msg.id)
 				g.logger.Log(logMsg, "LFDHeartbeatSent")
 			}
@@ -308,11 +317,23 @@ func (g *gfd) handleConnection(conn net.Conn) {
 			}
 
 			// Handle promotion message
-			if rmMsg.Message == "promote" {
+			if rmMsg.Message == "Promote" {
 				//g.forwardPromotionToLFD(rmMsg.Id)
 				g.sendPromotionMu.Lock()
 				g.sendPromotion = true
-				g.promotionPayload = buf[:n]
+				g.promotionPayload, _ = json.Marshal(&rmMsg)
+				g.sendPromotionMu.Unlock()
+				logMsg := fmt.Sprintf("Scheduled promotion for server %s", rmMsg.Id)
+				g.logger.Log(logMsg, "PromotionScheduled")
+				continue
+			}
+
+			if rmMsg.Message == "relaunch" {
+				g.sendPromotionMu.Lock()
+				g.sendRelaunch = true
+				g.sendRelaunchId = rmMsg.Id
+				logMsg := fmt.Sprintf("Scheduled relaunch for server %s", rmMsg.Id)
+				g.logger.Log(logMsg, "RelaunchScheduled")
 				g.sendPromotionMu.Unlock()
 			}
 		}
@@ -394,12 +415,12 @@ func (g *gfd) handleConnection(conn net.Conn) {
 	}
 }
 
-// func (g *gfd) updateMemberCount() {
-// 	memberCount := 0
-// 	for _, alive := range g.membership {
-// 		if alive {
-// 			memberCount++
-// 		}
-// 	}
-// 	g.memberCount = memberCount
-// }
+func (g *gfd) updateMemberCount() {
+	memberCount := 0
+	for _, alive := range g.membership {
+		if alive {
+			memberCount++
+		}
+	}
+	g.memberCount = memberCount
+}
