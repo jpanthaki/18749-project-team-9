@@ -47,6 +47,7 @@ var componentColors = map[string]map[string]string{
 	"Client": {
 		"MessageSent":     RGB(40, 160, 220),
 		"MessageReceived": RGB(90, 210, 255),
+		"MessageIgnored":  RGB(255, 80, 80),
 	},
 }
 

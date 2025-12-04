@@ -109,10 +109,22 @@ func (c *client) sendToAll(msg types.Message) (types.Response, error) {
 
 	first := <-responses
 
+	if first.err == nil {
+		logMsg := fmt.Sprintf("Received <%s, %s, %d, %s>", c.id, first.resp.Id, first.resp.ReqNum, first.resp.Response)
+		c.logger.Log(logMsg, "MessageReceived")
+	}
+
 	go func() {
 		wg.Wait()
 		close(responses)
 	}()
+
+	for r := range responses {
+		if r.err == nil && r.resp.Id != first.resp.Id {
+			logMsg := fmt.Sprintf("Ignored Duplicate Response from %s", r.resp.Id)
+			c.logger.Log(logMsg, "MessageIgnored")
+		}
+	}
 
 	return first.resp, first.err
 }
@@ -168,14 +180,12 @@ func main() {
 
 				c.reqNum++
 
-				resp, err := c.sendToAll(msg)
+				_, err := c.sendToAll(msg)
 				if err != nil {
 					c.reqNum--
 					continue
 				}
 
-				logMsg := fmt.Sprintf("Received <%s, %s, %d, %s>", c.id, resp.Id, c.reqNum, resp.Response)
-				c.logger.Log(logMsg, "MessageReceived")
 			}
 		}
 	} else {
