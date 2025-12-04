@@ -229,7 +229,7 @@ func (l *lfd) gfdLoop() {
 				// Check if this is a promotion message from RM (via GFD)
 				if msg.Payload != nil && len(msg.Payload) > 0 {
 					var rmMsg types.Message
-					json.Unmarshal(msg.Payload, rmMsg)
+					json.Unmarshal(msg.Payload, &rmMsg)
 					fmt.Println(rmMsg)
 					switch strings.ToLower(rmMsg.Message) {
 					case "promote":
