@@ -319,10 +319,9 @@ func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) 
 
 func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 	// Default heartbeat response
-	if msg.message.Payload != nil && len(msg.message.Payload) > 0 {
-		var rmMsg types.Message
-		json.Unmarshal(msg.message.Payload, &rmMsg)
-		s.handleRMMessage(rmMsg)
+	fmt.Println(msg.message.Message)
+	if strings.ToLower(msg.message.Message) == "promote" {
+		s.handleRMMessage(msg.message)
 	}
 	*resp = types.Response{Type: "lfd", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
 }
@@ -344,6 +343,7 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 }
 
 func (s *server) handleRMMessage(msg types.Message) {
+	fmt.Println(msg)
 	switch strings.ToLower(msg.Message) {
 	case "promote":
 		s.isLeader = true

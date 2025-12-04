@@ -5,15 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
 func Relaunch(method string, id string) {
 	cwd, _ := os.Getwd()
-	parent := filepath.Dir(cwd)
 
-	data, _ := os.ReadFile("../serverAddrs.json")
+	data, _ := os.ReadFile(fmt.Sprintf("%s/serverAddrs.json", cwd))
 
 	serverAddrs := make(map[string]string)
 
@@ -30,7 +28,7 @@ func Relaunch(method string, id string) {
 			do script "cd '%s'; %s"
 			activate
 		end tell
-		`, parent, escaped)
+		`, cwd, escaped)
 
 	cmd := exec.Command("osascript", "-e", appleScript)
 

@@ -226,25 +226,37 @@ func (l *lfd) gfdLoop() {
 			var msg types.Message
 			err = json.Unmarshal(buf[:n], &msg)
 			if err == nil {
+				fmt.Println(msg)
 				// Check if this is a promotion message from RM (via GFD)
-				if msg.Payload != nil && len(msg.Payload) > 0 {
-					var rmMsg types.Message
-					json.Unmarshal(msg.Payload, rmMsg)
-					fmt.Println(rmMsg)
-					switch strings.ToLower(rmMsg.Message) {
-					case "promote":
-						fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
-						l.sendPromotionMu.Lock()
-						l.sendPromotion = true
-						l.promotionPayload = msg.Payload
-						l.sendPromotionMu.Unlock()
-					case "relaunch":
-						fmt.Printf("\033[32m[%s] %s received relaunch from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
-						helpers.Relaunch(l.method, l.serverID)
-					}
-
-					//l.forwardPromotionToServer()
+				switch strings.ToLower(msg.Message) {
+				case "promote":
+					fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
+					l.sendPromotionMu.Lock()
+					l.sendPromotion = true
+					l.promotionPayload = msg.Payload
+					l.sendPromotionMu.Unlock()
+				case "relaunch":
+					fmt.Printf("\033[32m[%s] %s received relaunch from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
+					helpers.Relaunch(l.method, l.serverID)
 				}
+				// if msg.Payload != nil && len(msg.Payload) > 0 {
+				// 	var rmMsg types.Message
+				// 	json.Unmarshal(msg.Payload, &rmMsg)
+				// 	fmt.Println(rmMsg)
+				// 	switch strings.ToLower(rmMsg.Message) {
+				// 	case "promote":
+				// 		fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
+				// 		l.sendPromotionMu.Lock()
+				// 		l.sendPromotion = true
+				// 		l.promotionPayload = msg.Payload
+				// 		l.sendPromotionMu.Unlock()
+				// 	case "relaunch":
+				// 		fmt.Printf("\033[32m[%s] %s received relaunch from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
+				// 		helpers.Relaunch(l.method, l.serverID)
+				// 	}
+
+				// 	//l.forwardPromotionToServer()
+				// }
 				fmt.Printf("\033[36m[%s] [%d] %s received heartbeat ACK from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.gfdHeartbeatCount-1, l.id)
 				//heartbeatPending = false
 			}
@@ -295,12 +307,15 @@ func (l *lfd) Heartbeat() error {
 	}
 
 	var payload json.RawMessage
+	var message string
 	l.sendPromotionMu.Lock()
 	if l.sendPromotion {
 		payload = l.promotionPayload
+		message = "promote"
 		l.promotionPayload = nil
 		l.sendPromotion = false
 	} else {
+		message = "heartbeat"
 		payload = nil
 	}
 	l.sendPromotionMu.Unlock()
@@ -309,7 +324,7 @@ func (l *lfd) Heartbeat() error {
 		Type:    "lfd",
 		Id:      l.id,
 		ReqNum:  l.heartbeatCount,
-		Message: "heartbeat",
+		Message: message,
 		Payload: payload,
 	}
 
