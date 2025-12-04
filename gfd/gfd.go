@@ -18,18 +18,21 @@ type gfd struct {
 	membership  map[string]bool
 	memberCount int
 
-	lfdConns       map[string]net.Conn // maps serverID to LFD connection
-	connToServerId map[net.Conn]string // inversion of lfdConns map
-	connections    map[net.Conn]struct{}
-	rmConn         net.Conn // Connection to RM
+	lfdConns         map[string]net.Conn // maps serverID to LFD connection
+	connToServerId   map[net.Conn]string // inversion of lfdConns map
+	connections      map[net.Conn]struct{}
+	rmConn           net.Conn // Connection to RM
+	sendPromotion    bool     // Send promotion flag
+	promotionPayload json.RawMessage
 
-	lfdConnMu sync.Mutex
+	lfdConnMu       sync.Mutex
+	sendPromotionMu sync.Mutex // Protects sendPromotion access
 
 	msgCh chan struct {
 		id         string
 		message    types.Message
 		conn       net.Conn
-		responseCh chan types.Response
+		responseCh chan types.Message
 	}
 	closeCh chan struct{}
 
@@ -38,19 +41,20 @@ type gfd struct {
 
 func NewGfd(port int, protocol string) (Gfd, error) {
 	g := &gfd{
-		port:           port,
-		protocol:       protocol,
-		membership:     make(map[string]bool),
-		memberCount:    0,
-		connections:    make(map[net.Conn]struct{}),
-		lfdConns:       make(map[string]net.Conn),
-		connToServerId: make(map[net.Conn]string),
-		lfdConnMu:      sync.Mutex{},
+		port:            port,
+		protocol:        protocol,
+		membership:      make(map[string]bool),
+		memberCount:     0,
+		connections:     make(map[net.Conn]struct{}),
+		lfdConns:        make(map[string]net.Conn),
+		connToServerId:  make(map[net.Conn]string),
+		lfdConnMu:       sync.Mutex{},
+		sendPromotionMu: sync.Mutex{}, // Protects sendPromotion access
 		msgCh: make(chan struct {
 			id         string
 			message    types.Message
 			conn       net.Conn
-			responseCh chan types.Response
+			responseCh chan types.Message
 		}),
 		closeCh: make(chan struct{}),
 		logger:  log.New("GFD"),
@@ -94,7 +98,7 @@ func (g *gfd) manager() {
 	for {
 		select {
 		case msg := <-g.msgCh:
-			var resp types.Response
+			var resp types.Message
 			var logMsg string
 			switch msg.message.Message {
 			case "add":
@@ -116,7 +120,7 @@ func (g *gfd) manager() {
 					}
 					return s
 				}(g.membership), ",")
-				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Response: "Added"}
+				resp = types.Message{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Message: "Added"}
 				msg.responseCh <- resp
 				logMsg = fmt.Sprintf("Adding server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
 				g.logger.Log(logMsg, "AddingServer")
@@ -134,7 +138,7 @@ func (g *gfd) manager() {
 					}
 					return s
 				}(g.membership), ",")
-				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Response: "Removed"}
+				resp = types.Message{Type: "gfd", Id: msg.id, ReqNum: g.memberCount, Message: "Removed"}
 				msg.responseCh <- resp
 				logMsg = fmt.Sprintf("Removing server %s. GFD: %d members: %s", msg.id, g.memberCount, livingServers)
 				g.logger.Log(logMsg, "RemovingServer")
@@ -149,8 +153,20 @@ func (g *gfd) manager() {
 				g.lfdConnMu.Unlock()
 				logMsg = fmt.Sprintf("[%d] GFD receives heartbeat from %s", msg.message.ReqNum, msg.id)
 				g.logger.Log(logMsg, "LFDHeartbeatReceived")
-				resp = types.Response{Type: "gfd", Id: msg.id, ReqNum: msg.message.ReqNum, Response: "Alive"}
-				msg.responseCh <- resp
+				g.sendPromotionMu.Lock()
+				var payload json.RawMessage
+				if g.sendPromotion {
+					// Send promotion message
+					payload = g.promotionPayload
+					g.sendPromotion = false
+					g.promotionPayload = nil
+				} else {
+					payload = nil
+				}
+				g.sendPromotionMu.Unlock()
+				var message types.Message
+				message = types.Message{Type: "gfd", Id: msg.id, ReqNum: msg.message.ReqNum, Message: "Alive", Payload: payload}
+				msg.responseCh <- message
 				logMsg = fmt.Sprintf("[%d] GFD sending heartbeat ACK to %s", msg.message.ReqNum, msg.id)
 				g.logger.Log(logMsg, "LFDHeartbeatSent")
 			}
@@ -293,7 +309,11 @@ func (g *gfd) handleConnection(conn net.Conn) {
 
 			// Handle promotion message
 			if rmMsg.Message == "promote" {
-				g.forwardPromotionToLFD(rmMsg.Id)
+				//g.forwardPromotionToLFD(rmMsg.Id)
+				g.sendPromotionMu.Lock()
+				g.sendPromotion = true
+				g.promotionPayload = buf[:n]
+				g.sendPromotionMu.Unlock()
 			}
 		}
 	}
@@ -308,12 +328,12 @@ func (g *gfd) handleConnection(conn net.Conn) {
 		id         string
 		message    types.Message
 		conn       net.Conn
-		responseCh chan types.Response
+		responseCh chan types.Message
 	}{
 		id:         msg.Id,
 		message:    msg,
 		conn:       conn,
-		responseCh: make(chan types.Response),
+		responseCh: make(chan types.Message),
 	}
 
 	g.msgCh <- request
@@ -351,12 +371,12 @@ func (g *gfd) handleConnection(conn net.Conn) {
 			id         string
 			message    types.Message
 			conn       net.Conn
-			responseCh chan types.Response
+			responseCh chan types.Message
 		}{
 			id:         msg.Id,
 			message:    msg,
 			conn:       conn,
-			responseCh: make(chan types.Response),
+			responseCh: make(chan types.Message),
 		}
 
 		g.msgCh <- request

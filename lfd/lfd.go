@@ -50,6 +50,8 @@ func NewLfd(heartbeatFrequency int, id string, serverID string, port int, protoc
 		heartbeatCount:     1,
 		heartbeatFrequency: heartbeatFrequency,
 		closeCh:            make(chan struct{}),
+		gfdConnMu:          sync.Mutex{},
+		sendPromotionMu:    sync.Mutex{},
 		gfdPort:            gfdPort,
 		gfdAddr:            gfdAddr,
 		gfdHeartbeatCount:  1,
@@ -174,7 +176,7 @@ func (l *lfd) gfdLoop() {
 	}
 
 	// Channel to signal when we're expecting a heartbeat response
-	heartbeatPending := false
+	// heartbeatPending := false
 
 	for {
 		select {
@@ -199,7 +201,7 @@ func (l *lfd) gfdLoop() {
 				return
 			}
 			fmt.Printf("\033[36m[%s] [%d] %s sending heartbeat to GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.gfdHeartbeatCount, l.id)
-			heartbeatPending = true
+			//heartbeatPending = true
 			l.gfdHeartbeatCount++
 
 		default:
@@ -221,24 +223,24 @@ func (l *lfd) gfdLoop() {
 			err = json.Unmarshal(buf[:n], &msg)
 			if err == nil {
 				// Check if this is a promotion message from RM (via GFD)
-				if msg.Type == "rm" && msg.Message == "Promote" {
+				if msg.Payload != nil {
 					fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
 					l.sendPromotionMu.Lock()
 					l.sendPromotion = true
-					l.promotionPayload, _ = json.Marshal(&msg)
+					l.promotionPayload = msg.Payload
 					l.sendPromotionMu.Unlock()
 					//l.forwardPromotionToServer()
-					continue
 				}
+				fmt.Printf("\033[36m[%s] [%d] %s received heartbeat ACK from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.gfdHeartbeatCount-1, l.id)
+				//heartbeatPending = false
 			}
 
-			// Try to parse as response (for heartbeat ACK)
-			var resp types.Response
-			err = json.Unmarshal(buf[:n], &resp)
-			if err == nil && heartbeatPending {
-				fmt.Printf("\033[36m[%s] [%d] %s received heartbeat ACK from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.gfdHeartbeatCount-1, l.id)
-				heartbeatPending = false
-			}
+			// // Try to parse as response (for heartbeat ACK)
+			// var resp types.Response
+			// err = json.Unmarshal(buf[:n], &resp)
+			// if err == nil && heartbeatPending {
+
+			// }
 		}
 	}
 }
