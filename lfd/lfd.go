@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -226,10 +227,11 @@ func (l *lfd) gfdLoop() {
 			err = json.Unmarshal(buf[:n], &msg)
 			if err == nil {
 				// Check if this is a promotion message from RM (via GFD)
-				if msg.Payload != nil {
+				if msg.Payload != nil && len(msg.Payload) > 0 {
 					var rmMsg types.Message
 					json.Unmarshal(msg.Payload, rmMsg)
-					switch rmMsg.Message {
+					fmt.Println(rmMsg)
+					switch strings.ToLower(rmMsg.Message) {
 					case "promote":
 						fmt.Printf("\033[32m[%s] %s received promotion from GFD\033[0m\n", time.Now().Format("2006-01-02 15:04:05"), l.id)
 						l.sendPromotionMu.Lock()
