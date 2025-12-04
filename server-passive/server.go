@@ -233,9 +233,6 @@ func (s *server) manager() {
 			case "replica":
 				s.handleReplicaMessage(msg)
 				msg.responseCh <- resp
-			case "rm":
-				s.handleRMMessage(msg)
-				msg.responseCh <- resp
 			}
 		case <-ticker.C:
 			if s.isLeader {
@@ -321,6 +318,11 @@ func (s *server) handleClientMessage(msg internalMessage, resp *types.Response) 
 
 func (s *server) handleLFDMessage(msg internalMessage, resp *types.Response) {
 	// Default heartbeat response
+	if msg.message.Payload != nil && len(msg.message.Payload) > 0 {
+		var rmMsg types.Message
+		json.Unmarshal(msg.message.Payload, &rmMsg)
+		s.handleRMMessage(rmMsg)
+	}
 	*resp = types.Response{Type: "lfd", Id: s.id, ReqNum: msg.message.ReqNum, Response: fmt.Sprintf("%d", msg.message.ReqNum)}
 }
 
@@ -340,8 +342,8 @@ func (s *server) handleReplicaMessage(msg internalMessage) {
 	}
 }
 
-func (s *server) handleRMMessage(msg internalMessage) {
-	switch msg.message.Message {
+func (s *server) handleRMMessage(msg types.Message) {
+	switch msg.Message {
 	case "Promote":
 		s.isLeader = true
 		s.logLeaderPromotion()
