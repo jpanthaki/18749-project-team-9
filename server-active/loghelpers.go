@@ -10,6 +10,11 @@ func (s *server) logReceived(msg types.Message) {
 	s.logger.Log(logMsg, "MessageReceived")
 }
 
+func (s *server) logReceivedNotProcessed(msg types.Message) {
+	logMsg := fmt.Sprintf("Received, did not process <%s, %s, %d, %s>", msg.Id, s.id, msg.ReqNum, msg.Message)
+	s.logger.Log(logMsg, "MessageReceived")
+}
+
 func (s *server) logSent(resp types.Response) {
 	logMsg := fmt.Sprintf("Sending <%s, %s, %d, %s>", resp.Id, s.id, resp.ReqNum, resp.Response)
 	s.logger.Log(logMsg, "MessageSent")
