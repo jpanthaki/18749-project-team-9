@@ -298,25 +298,24 @@ func (g *gfd) handleConnection(conn net.Conn) {
 		initialBytes, _ := json.Marshal(initialMsg)
 		conn.Write(initialBytes)
 
+		dec := json.NewDecoder(conn)
+
 		// Keep connection open for RM and listen for promotion messages
 		for {
-			buf := make([]byte, 1024)
-			n, err := conn.Read(buf)
-			if err != nil {
-				g.rmConn = nil
-				return
-			}
 
 			// Parse message from RM
 			var rmMsg types.Message
-			err = json.Unmarshal(buf[:n], &rmMsg)
-			if err != nil {
+			if err := dec.Decode(&rmMsg); err != nil {
+				logMsg = fmt.Sprintf("Failed to parse RM message: %v", err)
+				g.logger.Log(logMsg, "RMMessageParseFailed")
 				continue
 			}
 
+			logMsg = fmt.Sprintf("Parsed RM message: %v", rmMsg)
+			g.logger.Log(logMsg, "RMMessageParsed")
+
 			// Handle promotion message
 			if rmMsg.Message == "Promote" {
-				//g.forwardPromotionToLFD(rmMsg.Id)
 				g.sendPromotionMu.Lock()
 				g.sendPromotion = true
 				g.sendPromotionId = rmMsg.Id

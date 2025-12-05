@@ -71,8 +71,7 @@ func (r *rm) Start() error {
 	}
 
 	// Manage replicas and listen for GFD for failures
-	go r.manager()
-	go r.listenToGFD()
+	go r.gfdLoop()
 
 	logMsg := fmt.Sprintf("RM started on port %d, connected to GFD:%s", r.port, r.gfdAddr)
 	r.logger.Log(logMsg, "RMStarted")
@@ -95,35 +94,51 @@ func (r *rm) GetPrimary() string {
 	return r.primary
 }
 
-func (r *rm) manager() {
+func (r *rm) gfdLoop() {
+	defer r.gfdConn.Close()
 	for {
 		select {
-		case msg := <-r.msgCh:
+		case <-r.closeCh:
+			return
+		default:
+			buf := make([]byte, 1024)
+			r.gfdConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			n, err := r.gfdConn.Read(buf)
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue // Timeout is expected, keep looping
+				}
+				return // Real error, exit
+			}
+
+			var msg types.Message
+			err = json.Unmarshal(buf[:n], &msg)
+			if err != nil {
+				continue
+			}
+
+			// Process message directly
 			switch msg.Message {
 			case "add":
 				r.membership[msg.Id] = true
-				// elect primary if this is the first member
-				r.logger.Log((fmt.Sprintf("current primary: %s", r.primary)), "CurrentPrimary")
+				r.logger.Log(fmt.Sprintf("current primary: %s", r.primary), "CurrentPrimary")
 				if r.primary == "" {
-					r.logger.Log(("Found empty primary, electing new primary"), "CurrentPrimary")
+					r.logger.Log("Found empty primary, electing new primary", "CurrentPrimary")
 					r.electPrimary()
 				}
 				r.resetMemberCount()
 				r.printMembership("Added", msg.Id)
 			case "remove":
 				r.membership[msg.Id] = false
-				// Only re-elect if the primary died
-				r.logger.Log((fmt.Sprintf("a server %s died, current primary: %s", msg.Id, r.primary)), "CurrentPrimary")
+				r.logger.Log(fmt.Sprintf("a server %s died, current primary: %s", msg.Id, r.primary), "CurrentPrimary")
 				if r.primary == msg.Id {
-					r.logger.Log((fmt.Sprintf("Primary %s died, electing new primary", r.primary)), "CurrentPrimary")
+					r.logger.Log(fmt.Sprintf("Primary %s died, electing new primary", r.primary), "CurrentPrimary")
 					r.electPrimary()
 				}
 				r.resetMemberCount()
 				r.printMembership("Removed", msg.Id)
 				r.sendRelaunchMessage(msg.Id)
 			}
-		case <-r.closeCh:
-			return
 		}
 	}
 }
@@ -160,26 +175,6 @@ func (r *rm) resetMemberCount() {
 		}
 	}
 	r.memberCount = count
-}
-
-func (r *rm) listenToGFD() {
-	defer r.gfdConn.Close()
-	for {
-		buf := make([]byte, 1024)
-		n, err := r.gfdConn.Read(buf)
-		if err != nil {
-			return
-		}
-
-		var msg types.Message
-		err = json.Unmarshal(buf[:n], &msg)
-		if err != nil {
-			continue
-		}
-
-		// Feed into channel for manager
-		r.msgCh <- msg
-	}
 }
 
 func (r *rm) electPrimary() {
