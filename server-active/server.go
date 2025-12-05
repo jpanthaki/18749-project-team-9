@@ -20,6 +20,7 @@ type server struct {
 	checkpointCount int
 	checkpointCh    chan types.Checkpoint
 	peers           map[string]string
+	loggedMessages  map[int]types.Message
 	highWatermark   int
 	lastReqNum      int
 
@@ -65,6 +66,7 @@ func NewServer(id string, port int, protocol string, lfdPort int, peers map[stri
 		checkpointCount: 0,
 		checkpointCh:    make(chan types.Checkpoint),
 		peers:           peers,
+		loggedMessages:  make(map[int]types.Message),
 		highWatermark:   0,
 		lastReqNum:      0,
 
@@ -252,6 +254,8 @@ func (s *server) manager() {
 						s.highWatermark = msg.message.ReqNum
 					}
 					s.watermarkMu.Unlock()
+					s.loggedMessages[msg.message.ReqNum] = msg.message
+					s.logReceivedNotProcessed(msg.message)
 					msg.responseCh <- resp
 				}
 
